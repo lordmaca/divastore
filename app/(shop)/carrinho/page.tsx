@@ -1,14 +1,40 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getCartReadOnly, cartTotals } from "@/lib/cart";
 import { CartItemRow } from "@/components/CartItemRow";
 import { CartShippingPreview } from "@/components/CartShippingPreview";
+import { DeepLinkToast } from "@/components/DeepLinkToast";
 import { getSetting } from "@/lib/settings";
 import { formatBRL } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
-export default async function CarrinhoPage() {
+// DivaHub DM deep link contract (see docs/api/divahub-dm-cart-deeplink.md):
+//   /carrinho?add=<slug>&add=<slug>&cartRef=<uuid>&utm_source=divahub_dm&...
+// The `add` params are processed once, then we 307-redirect to the same
+// URL minus `add` so a refresh doesn't double-add. `cartRef` + `utm_*`
+// survive the redirect so downstream analytics + checkout attribution
+// still fire.
+export default async function CarrinhoPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+
+  // DivaHub DM deep-link: delegate to the route handler which is allowed
+  // to write cookies (dh_cart_ref) and call ensureCartWritable. The
+  // handler redirects back to /carrinho with `add` stripped + a toast code.
+  if (sp.add) {
+    const out = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) {
+      if (Array.isArray(v)) v.forEach((x) => out.append(k, x));
+      else if (typeof v === "string") out.append(k, v);
+    }
+    redirect(`/api/cart/deep-link?${out.toString()}`);
+  }
+
   const session = await auth();
   const cart = await getCartReadOnly(session?.user?.id ?? null);
   const { subtotalCents, itemCount } = cartTotals(cart);
@@ -16,6 +42,7 @@ export default async function CarrinhoPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-4 sm:px-6 py-10">
+      <DeepLinkToast />
       <h1 className="font-display text-4xl text-[color:var(--pink-600)] mb-8">Seu carrinho</h1>
 
       {itemCount === 0 ? (

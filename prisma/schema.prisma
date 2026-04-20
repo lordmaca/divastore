@@ -247,6 +247,10 @@ model Order {
   deletedAt         DateTime?
   deletedBy         String?
   deletionReason    String?
+  // Attribution data captured at checkout. Shape is open so we can plug
+  // new sources without migrations — e.g. DivaHub DM cart deep links
+  // (`{ source: "divahub_dm", cartRef: "<uuid>", utm: {...} }`).
+  attribution       Json?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 

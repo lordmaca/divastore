@@ -22,6 +22,7 @@ import { sendSafe } from "@/lib/notifications/dispatch";
 import { absoluteUrl } from "@/lib/notifications/templates/shared";
 import { recordOrderEvent } from "@/lib/order-events";
 import { isValidCpf, sanitizeCpf } from "@/lib/cpf";
+import { cookies } from "next/headers";
 import { OrderEventType } from "@/lib/generated/prisma/enums";
 
 const addressSchema = z.object({
@@ -253,6 +254,28 @@ export async function placeOrder(formData: FormData) {
 
   const totalCents = Math.max(0, subtotalCents + shippingCents - discountCents);
 
+  // Read DM deep-link attribution (set by /api/cart/deep-link when the
+  // customer arrived via a Divinha cart link). Consumed once: we clear
+  // the cookie so follow-up orders don't inherit the wrong attribution.
+  let attribution: Prisma.InputJsonValue | undefined;
+  try {
+    const jar = await cookies();
+    const raw = jar.get("dh_cart_ref")?.value;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { cartRef?: string; utmSource?: string };
+      if (parsed.cartRef) {
+        attribution = {
+          source: parsed.utmSource ?? "divahub_dm",
+          cartRef: parsed.cartRef,
+          capturedAt: new Date().toISOString(),
+        };
+      }
+      jar.delete("dh_cart_ref");
+    }
+  } catch {
+    // Malformed cookie — ignore, no attribution.
+  }
+
   const order = await prisma.$transaction(async (tx) => {
     const created = await tx.order.create({
       data: {
@@ -267,6 +290,7 @@ export async function placeOrder(formData: FormData) {
           ...parsedAddress.data,
           country: "BR",
         } as unknown as Prisma.InputJsonValue,
+        attribution,
         shippingCarrier,
         shippingServiceId,
         shippingEtaDays,
