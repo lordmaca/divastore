@@ -50,6 +50,7 @@ model Product {
   reviews       Review[]
   wishlistItems WishlistItem[]
   categoryIssue CategoryAuditIssue?
+  heroSlides    HeroSlide[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -728,4 +729,55 @@ model Shipment {
   @@index([orderId])
   @@index([status])
   @@index([trackingCode])
+}
+
+// ---------- Home hero slides ----------
+
+enum HeroSlideSource {
+  DIVAHUB_AUTO
+  MANUAL
+}
+
+// Rotating hero slides surfaced on the storefront landing page. DivaHub
+// upserts one per product (by externalId) when it publishes a product; the
+// home page picks N at random among slides that are enabled, in their
+// active window, and — if linked to a product — whose product is active
+// and still has stock. The admin can override any text field (headline,
+// sub, ctaLabel, ctaUrl) without losing DivaHub's suggestion — the original
+// stays in the base column and is displayed when the override is null.
+model HeroSlide {
+  id               String          @id @default(cuid())
+  // DivaHub-side id for idempotent upserts. Null for MANUAL slides.
+  externalId       String?         @unique
+  // Optional product link. When set, the slide is only shown while the
+  // product is active and has stock in at least one variant.
+  productId        String?
+  product          Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // DivaHub-provided (or manually-entered) content.
+  imageUrl         String
+  imageAlt         String?
+  headline         String
+  sub              String?
+  ctaLabel         String
+  ctaUrl           String
+
+  // Admin overrides — when non-null, displayed instead of the base field.
+  headlineOverride String?
+  subOverride      String?
+  ctaLabelOverride String?
+  ctaUrlOverride   String?
+
+  enabled          Boolean         @default(true)
+  weight           Int             @default(1)
+  activeFrom       DateTime?
+  activeUntil      DateTime?
+  source           HeroSlideSource @default(DIVAHUB_AUTO)
+
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([enabled])
+  @@index([productId])
+  @@index([source])
 }

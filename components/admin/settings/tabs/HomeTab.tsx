@@ -16,6 +16,10 @@ import {
 } from "@/components/admin/settings/fields";
 import { saveSettingAction } from "@/lib/admin-actions";
 import { ImageUpload } from "@/components/admin/settings/ImageUpload";
+import {
+  HeroSlideQueue,
+  type SlideRow,
+} from "@/components/admin/settings/HeroSlideQueue";
 
 // All five sections of the home editor. Each section saves independently
 // so a partial error doesn't block the rest.
@@ -93,6 +97,7 @@ type Props = {
   newsletter: Newsletter;
   reviews: Reviews;
   heroSlides: HeroSlides;
+  heroSlideRows: SlideRow[];
   campaign: CampaignBanner;
   lookbook: Lookbook;
   availableCategories: Category[];
@@ -111,6 +116,7 @@ export function HomeTab(p: Props) {
         detail="Cada bloco salva separado. Use os ajustes abaixo para customizar a home."
       />
 
+      <HeroQueueWrapper rows={p.heroSlideRows} />
       <HeroSlidesSection initial={p.heroSlides} />
       <HeroSection initial={p.hero} />
       <UspSection initial={p.usps} />
@@ -523,6 +529,19 @@ function ReviewsSection({ initial }: { initial: Reviews }) {
         />
       </FieldGrid>
       <SaveRow dirty={dirty} saving={saving} onSave={save} msg={msg} />
+    </SettingsSection>
+  );
+}
+
+// ---------- Hero slide queue (DivaHub-fed + admin overrides) ----------
+
+function HeroQueueWrapper({ rows }: { rows: SlideRow[] }) {
+  return (
+    <SettingsSection
+      title="Hero — fila automática (DivaHub)"
+      description="Slides gerados pelo DivaHub a cada produto publicado. A home escolhe aleatoriamente entre os ativos e com estoque. Você pode otimizar os textos aqui — o original fica guardado."
+    >
+      <HeroSlideQueue slides={rows} />
     </SettingsSection>
   );
 }

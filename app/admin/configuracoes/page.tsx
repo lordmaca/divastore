@@ -241,7 +241,7 @@ async function StorageTabServer() {
 }
 
 async function HomeTabServer() {
-  const [hero, usps, featured, badges, newsletter, reviews, heroSlides, campaign, lookbook, cats] = await Promise.all([
+  const [hero, usps, featured, badges, newsletter, reviews, heroSlides, campaign, lookbook, cats, slideRows] = await Promise.all([
     getSetting("home.hero"),
     getSetting("home.usps"),
     getSetting("home.featuredCategories"),
@@ -259,6 +259,18 @@ async function HomeTabServer() {
       },
       orderBy: { name: "asc" },
     }),
+    prisma.heroSlide.findMany({
+      orderBy: [{ enabled: "desc" }, { updatedAt: "desc" }],
+      include: {
+        product: {
+          select: {
+            name: true,
+            active: true,
+            variants: { select: { stock: true } },
+          },
+        },
+      },
+    }),
   ]);
   return (
     <HomeTab
@@ -269,6 +281,33 @@ async function HomeTabServer() {
       newsletter={newsletter}
       reviews={reviews}
       heroSlides={heroSlides}
+      heroSlideRows={slideRows.map((s) => {
+        const stockSum = s.product?.variants.reduce((a, v) => a + v.stock, 0) ?? 0;
+        return {
+          id: s.id,
+          externalId: s.externalId,
+          source: s.source,
+          imageUrl: s.imageUrl,
+          imageAlt: s.imageAlt,
+          headline: s.headline,
+          sub: s.sub,
+          ctaLabel: s.ctaLabel,
+          ctaUrl: s.ctaUrl,
+          headlineOverride: s.headlineOverride,
+          subOverride: s.subOverride,
+          ctaLabelOverride: s.ctaLabelOverride,
+          ctaUrlOverride: s.ctaUrlOverride,
+          enabled: s.enabled,
+          weight: s.weight,
+          productLinked: Boolean(s.productId),
+          productName: s.product?.name ?? null,
+          productActive: s.product ? s.product.active : null,
+          productInStock: s.product ? stockSum > 0 : null,
+          activeFrom: s.activeFrom?.toISOString() ?? null,
+          activeUntil: s.activeUntil?.toISOString() ?? null,
+          createdAt: s.createdAt.toISOString(),
+        };
+      })}
       campaign={campaign}
       lookbook={lookbook}
       availableCategories={cats.map((c) => ({

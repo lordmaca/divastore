@@ -14,6 +14,7 @@ import { SITE_URL } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
 import { ReviewStatus } from "@/lib/generated/prisma/enums";
+import { resolveHeroSlides } from "@/lib/hero-slides";
 
 export const dynamic = "force-dynamic";
 
@@ -59,22 +60,37 @@ export default async function Home() {
     getSetting("home.lookbook"),
   ]);
 
-  // Filter slides by activeFrom/activeUntil at render time. The slider is
-  // the "preferred" hero — when at least one slide is active, the legacy
-  // glass card is suppressed so we don't stack two hero blocks.
-  const now = Date.now();
-  const activeSlides = heroSlidesSetting.slides.filter((s) => {
-    if (!s.imageUrl || !s.headline) return false;
-    if (s.activeFrom) {
-      const from = new Date(s.activeFrom).getTime();
-      if (Number.isFinite(from) && now < from) return false;
-    }
-    if (s.activeUntil) {
-      const until = new Date(s.activeUntil).getTime();
-      if (Number.isFinite(until) && now > until) return false;
-    }
-    return true;
-  });
+  // Hero source of truth is the DB queue (populated by DivaHub pushes + any
+  // manual slides from admin). The legacy `home.heroSlides` setting is kept
+  // as a fallback for environments where DivaHub hasn't started pushing yet.
+  const dbSlides = await resolveHeroSlides(5);
+  const legacyNow = Date.now();
+  const legacySlides =
+    dbSlides.length > 0
+      ? []
+      : heroSlidesSetting.slides
+          .filter((s) => {
+            if (!s.imageUrl || !s.headline) return false;
+            if (s.activeFrom) {
+              const from = new Date(s.activeFrom).getTime();
+              if (Number.isFinite(from) && legacyNow < from) return false;
+            }
+            if (s.activeUntil) {
+              const until = new Date(s.activeUntil).getTime();
+              if (Number.isFinite(until) && legacyNow > until) return false;
+            }
+            return true;
+          })
+          .map((s) => ({
+            id: s.id,
+            imageUrl: s.imageUrl,
+            imageAlt: s.imageAlt,
+            headline: s.headline,
+            sub: s.sub,
+            ctaLabel: s.ctaLabel,
+            ctaUrl: s.ctaUrl,
+          }));
+  const activeSlides = dbSlides.length > 0 ? dbSlides : legacySlides;
   const showLegacyHero = hero.enabled && activeSlides.length === 0;
 
   // Featured products. Badges computed server-side from (createdAt within
