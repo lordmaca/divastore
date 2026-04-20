@@ -240,6 +240,7 @@ export default async function ProductPage({
                 name: v.name,
                 priceCents: v.priceCents,
                 stock: v.stock,
+                attributes: (v.attributes ?? null) as Record<string, unknown> | null,
               }))}
             />
           </div>

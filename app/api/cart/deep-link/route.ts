@@ -62,6 +62,13 @@ export async function GET(req: NextRequest) {
           : "dm-cart-added";
   if (toast) out.set("toast", toast);
 
+  // Propagate human-readable labels for missing items (e.g. "Tamanho 17")
+  // so the toast can be specific instead of generic. Trim to avoid blowing
+  // the URL length budget when the customer asked for many things.
+  if (outcome.missing.length > 0) {
+    out.set("missing", outcome.missing.slice(0, 4).join("|").slice(0, 200));
+  }
+
   // Resolve the public origin so nginx doesn't end up serving a redirect
   // to localhost:3001 (req.url is the internal URL Next sees). Prefer the
   // X-Forwarded-Host trio, then fall back to the configured SITE_URL.
