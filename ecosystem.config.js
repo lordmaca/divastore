@@ -102,6 +102,22 @@ module.exports = {
       time: true,
     },
     {
+      // Daily backup. Tarball do working tree + dump do Postgres em
+      // /home/ubuntu/backups + push pro GitHub (lordmaca/divastore).
+      // Roda 03:00 BRT (06:00 UTC). Mantém últimos 14 snapshots locais.
+      name: "brilhodediva-backup",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "/home/ubuntu/brilhodedivasite/scripts/bdd",
+      args: "backup",
+      interpreter: "bash",
+      autorestart: false,
+      cron_restart: "0 6 * * *",
+      env: { NODE_ENV: "production", PATH: "/usr/local/bin:/usr/bin:/bin" },
+      out_file: "/home/ubuntu/brilhodedivasite/logs/backup-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/backup-err.log",
+      time: true,
+    },
+    {
       // Abandoned-cart nudge. Runs every 30 minutes. Opt-in gated; sends
       // at most twice per cart (first at 4h idle, second at 24h if still).
       name: "brilhodediva-abandoned-cart",

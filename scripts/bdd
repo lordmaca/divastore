@@ -28,6 +28,7 @@ BDD_APPS=(
   "brilhodediva-tiny-stock-sync"
   "brilhodediva-invoice-poll"
   "brilhodediva-category-scan"
+  "brilhodediva-backup"
 )
 MAIN_APP="brilhodediva"
 STOREFRONT_URL="https://loja.brilhodediva.com.br"
