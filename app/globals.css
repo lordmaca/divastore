@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  /* Brilho de Diva — brand tokens */
+  --bg-lavender-from: #e9defc;
+  --bg-lavender-to: #f4d9ee;
+  --pink-50: #fff0f7;
+  --pink-200: #ffc8e0;
+  --pink-400: #ff86bd;
+  --pink-500: #ff5fa9;
+  --pink-600: #d23a85;
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --foreground: #4a2a55;
+}
+
+@theme inline {
+  --color-pink-brand: var(--pink-500);
+  --color-pink-deep: var(--pink-600);
+  --color-glass: var(--glass-bg);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins);
+  --font-display: var(--font-script);
+}
+
+body {
+  background:
+    radial-gradient(at 20% 10%, var(--bg-lavender-from) 0%, transparent 55%),
+    radial-gradient(at 80% 90%, var(--bg-lavender-to) 0%, transparent 55%),
+    linear-gradient(180deg, var(--bg-lavender-from) 0%, var(--bg-lavender-to) 100%);
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-poppins), system-ui, sans-serif;
+  min-height: 100dvh;
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow:
+    0 12px 40px -12px rgba(210, 58, 133, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.font-display {
+  font-family: var(--font-script), "Dancing Script", cursive;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sparkle {
+    animation: none !important;
+  }
+}
+
+@keyframes sparkle-twinkle {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+
+.sparkle {
+  animation: sparkle-twinkle 3.4s ease-in-out infinite;
+}

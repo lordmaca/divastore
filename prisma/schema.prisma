@@ -1,0 +1,731 @@
+// Brilho de Diva storefront — initial schema
+// Money is stored as integer cents (BRL).
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../lib/generated/prisma"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Catalog ----------
+
+model Category {
+  id        String     @id @default(cuid())
+  slug      String     @unique
+  name      String
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  products  Product[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+enum ProductSource {
+  MANUAL
+  DIVAHUB
+}
+
+model Product {
+  id             String         @id @default(cuid())
+  slug           String         @unique
+  name           String
+  shortName      String?
+  description    String
+  active         Boolean        @default(true)
+  source         ProductSource  @default(MANUAL)
+  externalId     String?        @unique
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String[]       @default([])
+  categoryId     String?
+  category       Category?      @relation(fields: [categoryId], references: [id])
+  variants      Variant[]
+  images        Image[]
+  videos        ProductVideo[]
+  reviews       Review[]
+  wishlistItems WishlistItem[]
+  categoryIssue CategoryAuditIssue?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([active])
+  @@index([source])
+}
+
+enum VideoSource {
+  YOUTUBE
+  TIKTOK
+  INSTAGRAM
+  OCI
+}
+
+enum VideoKind {
+  REEL
+  STORY
+}
+
+model ProductVideo {
+  id        String      @id @default(cuid())
+  productId String
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  source    VideoSource
+  kind      VideoKind
+  position  Int         @default(0)
+  createdAt DateTime    @default(now())
+
+  @@index([productId, position])
+}
+
+model Variant {
+  id         String      @id @default(cuid())
+  productId  String
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku        String      @unique
+  name       String?
+  priceCents Int
+  stock      Int         @default(0)
+  weightG    Int?
+  widthCm    Int?
+  heightCm   Int?
+  lengthCm   Int?
+  attributes Json?
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([productId])
+}
+
+model Image {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([productId, position])
+}
+
+// ---------- Customers & auth ----------
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+model Customer {
+  id               String         @id @default(cuid())
+  email            String         @unique
+  passwordHash     String?
+  name             String?
+  phone            String?
+  cpf              String?        @unique
+  role             Role           @default(CUSTOMER)
+  emailVerified    DateTime?
+  // Guest accounts created at checkout without a password. They can be
+  // "claimed" later via the password-reset flow — same email, set passwordHash.
+  guest            Boolean        @default(false)
+  // LGPD opt-in flags. Transactional comms (order updates, password reset)
+  // are always sent; marketing-category messages gate on these.
+  marketingOptIn   Boolean        @default(false)
+  marketingOptInAt DateTime?
+  whatsappOptIn    Boolean        @default(false)
+  whatsappOptInAt  DateTime?
+  addresses        Address[]
+  orders           Order[]
+  carts            Cart[]
+  reviews          Review[]
+  wishlistItems    WishlistItem[]
+  notifications    Notification[]
+  resetTokens      PasswordResetToken[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String?
+  recipient  String
+  cep        String
+  street     String
+  number     String
+  complement String?
+  district   String
+  city       String
+  state      String
+  country    String   @default("BR")
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([customerId])
+}
+
+// ---------- Cart & orders ----------
+
+model Cart {
+  id         String     @id @default(cuid())
+  customerId String?
+  customer   Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  sessionKey String?    @unique
+  items      CartItem[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   Variant  @relation(fields: [variantId], references: [id])
+  qty       Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, variantId])
+}
+
+enum OrderStatus {
+  PENDING
+  AWAITING_PAYMENT
+  PAID
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  number            Int         @unique @default(autoincrement())
+  customerId        String?
+  customer          Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  status            OrderStatus @default(PENDING)
+  subtotalCents     Int
+  shippingCents     Int         @default(0)
+  discountCents     Int         @default(0)
+  couponCode        String?
+  totalCents        Int
+  shippingAddress   Json
+  shippingCarrier   String?
+  shippingServiceId String?
+  shippingEtaDays   Int?
+  // Carrier tracking code + direct tracking URL. Populated by the admin
+  // "mark as shipped" action; rendered on the order-detail page and in the
+  // order_shipped email/WhatsApp template.
+  trackingCode      String?
+  trackingUrl       String?
+  // Denormalized cache of the latest Payment's method + status so the admin
+  // list doesn't need a JOIN. Kept in sync by the MP webhook + checkout
+  // action. NOT authoritative — read Payment[] for truth.
+  lastPaymentMethod PaymentMethod?
+  lastPaymentStatus PaymentStatus?
+  items             OrderItem[]
+  payments          Payment[]
+  events            OrderEvent[]
+  invoices          Invoice[]
+  shipments         Shipment[]
+  notifications     Notification[]
+  tinyOrderId       String?     @unique
+  // Soft delete — null means active. Admins can delete non-fiscal,
+  // non-fulfilled orders (see canDeleteOrder); deletion keeps the row +
+  // related history for audit and LGPD compliance.
+  deletedAt         DateTime?
+  deletedBy         String?
+  deletionReason    String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([lastPaymentMethod])
+  @@index([lastPaymentStatus])
+  @@index([deletedAt])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId      String
+  variant        Variant @relation(fields: [variantId], references: [id])
+  sku            String
+  nameSnapshot   String
+  unitPriceCents Int
+  qty            Int
+  totalCents     Int
+
+  @@index([orderId])
+}
+
+// ---------- Payments ----------
+
+enum PaymentMethod {
+  PIX
+  BOLETO
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  IN_PROCESS
+  APPROVED
+  REJECTED
+  CANCELLED
+  REFUNDED
+  CHARGED_BACK
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider    String        @default("mercadopago")
+  providerId  String?       @unique
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+  amountCents Int
+  // MP's finer-grained identifier — "account_money", "credit_card",
+  // "debit_card", "ticket" (boleto), "bank_transfer" (pix). More useful for
+  // filters than the coarse `method` enum.
+  paymentTypeId          String?
+  // Card-flow details
+  installments           Int?
+  installmentAmountCents Int?
+  cardLastFour           String?
+  cardHolderName         String?
+  // Settlement
+  feeCents               Int?
+  netReceivedCents       Int?
+  // Refunds (partial supported — aggregate total)
+  refundedCents          Int           @default(0)
+  refundedAt             DateTime?
+  // Pix pending — QR code customers can copy-paste or scan from mobile
+  pixQrCode              String?
+  pixQrCodeBase64        String?       @db.Text
+  pixExpiresAt           DateTime?
+  // Boleto pending
+  boletoUrl              String?
+  boletoBarcode          String?
+  boletoExpiresAt        DateTime?
+  rawPayload             Json?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([paymentTypeId])
+}
+
+// ---------- Reviews ----------
+
+enum ReviewStatus {
+  PUBLISHED
+  HIDDEN
+}
+
+model Review {
+  id         String       @id @default(cuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating     Int
+  body       String?
+  status     ReviewStatus @default(PUBLISHED)
+  createdAt  DateTime     @default(now())
+
+  @@unique([productId, customerId])
+  @@index([productId])
+  @@index([status])
+}
+
+// ---------- Wishlist ----------
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, productId])
+  @@index([customerId])
+}
+
+// ---------- Coupons ----------
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+model Coupon {
+  id              String     @id @default(cuid())
+  code            String     @unique
+  type            CouponType
+  value           Int
+  minSubtotalCents Int       @default(0)
+  active          Boolean    @default(true)
+  expiresAt       DateTime?
+  usageLimit      Int?
+  usedCount       Int        @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([active])
+}
+
+// ---------- Integration Center ----------
+
+model IntegrationRun {
+  id         String   @id @default(cuid())
+  adapter    String
+  operation  String
+  status     String
+  inputHash  String?
+  durationMs Int?
+  error      String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([adapter, createdAt])
+  @@index([status])
+}
+
+// ---------- Analytics ----------
+
+enum FunnelEventType {
+  VIEW_PDP
+  ADD_TO_CART
+  BEGIN_CHECKOUT
+  ORDER_CREATED
+  ORDER_PAID
+}
+
+model PageView {
+  id          String   @id @default(cuid())
+  path        String
+  productId   String?
+  sessionId   String
+  customerId  String?
+  referer     String?
+  device      String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([productId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model FunnelEvent {
+  id         String          @id @default(cuid())
+  type       FunnelEventType
+  sessionId  String
+  customerId String?
+  productId  String?
+  orderId    String?
+  metadata   Json?
+  createdAt  DateTime        @default(now())
+
+  @@index([type, createdAt])
+  @@index([sessionId])
+  @@index([productId, type, createdAt])
+}
+
+model ProductMetricDaily {
+  productId    String
+  day          DateTime
+  views        Int      @default(0)
+  addsToCart   Int      @default(0)
+  ordersPaid   Int      @default(0)
+  revenueCents Int      @default(0)
+
+  @@id([productId, day])
+  @@index([day])
+}
+
+// ---------- Settings (admin-editable key/value) ----------
+
+model SettingsKv {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// ---------- Settings audit trail ----------
+// One row per save action. NEVER stores old/new values for secret keys —
+// only the admin, timestamp, and key identifier. For non-secret keys we
+// store a compact diff for operator visibility.
+
+model SettingChange {
+  id         String   @id @default(cuid())
+  settingKey String
+  fieldPath  String?
+  changedBy  String
+  isSecret   Boolean  @default(false)
+  diff       Json?
+  createdAt  DateTime @default(now())
+
+  @@index([settingKey, createdAt])
+  @@index([changedBy, createdAt])
+}
+
+// ---------- Notifications (email now, WhatsApp later) ----------
+// Every customer-facing message goes through a Notification row. The row acts
+// as an outbox — the dispatcher renders + delivers, and a PM2 cron retries
+// any FAILED rows. `@@unique([orderId, template, channel])` guarantees we
+// never double-send the same transactional event.
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  customerId String?
+  customer   Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId    String?
+  order      Order?              @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  channel    NotificationChannel
+  template   String
+  recipient  String
+  subject    String?
+  status     NotificationStatus  @default(PENDING)
+  payload    Json
+  attempts   Int                 @default(0)
+  lastError  String?
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@unique([orderId, template, channel])
+  @@index([status, createdAt])
+  @@index([customerId, createdAt])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([expiresAt])
+}
+
+// ---------- Stock sync (Tiny ERP → storefront) ----------
+// Every change to Variant.stock driven by a sync pass produces a
+// StockSyncEvent row. SKU is recorded denormalized so the trail survives
+// a variant rename/deletion.
+
+enum StockSyncSource {
+  TINY_CRON
+  TINY_WEBHOOK
+  ADMIN_MANUAL
+  CLI
+}
+
+model StockSyncEvent {
+  id               String          @id @default(cuid())
+  sku              String
+  variantId        String?
+  oldStock         Int
+  newStock         Int
+  source           StockSyncSource
+  integrationRunId String?
+  createdAt        DateTime        @default(now())
+
+  @@index([sku, createdAt])
+  @@index([createdAt])
+  @@index([integrationRunId])
+}
+
+// ---------- Order events (timeline / audit trail) ----------
+// Every state transition that touches an order produces one row. This is
+// the single source of truth for "what happened when" and powers the
+// admin detail page timeline + any future customer-facing history view.
+
+enum OrderEventType {
+  ORDER_CREATED
+  PAYMENT_PENDING
+  PAYMENT_APPROVED
+  PAYMENT_REJECTED
+  PAYMENT_REFUNDED
+  PAYMENT_CHARGED_BACK
+  INVOICE_REQUESTED
+  INVOICE_ISSUED
+  INVOICE_FAILED
+  INVOICE_CANCELLED
+  LABEL_PURCHASED
+  SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERY_EXCEPTION
+  DELIVERED
+  CANCELLED
+  NOTE_ADDED
+}
+
+model OrderEvent {
+  id        String         @id @default(cuid())
+  orderId   String
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      OrderEventType
+  // Who/what caused the event: "system", "customer", "admin:<id>",
+  // "webhook:mp", "webhook:tiny", "cron:<name>", etc.
+  actor     String         @default("system")
+  message   String?
+  metadata  Json?
+  createdAt DateTime       @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ---------- Fiscal documents (NF-e) ----------
+// One Invoice row per NF-e emission attempt. Tiny owns the fiscal document;
+// we only mirror its status + the download URLs. `providerInvoiceId` is
+// Tiny's internal NF id (distinct from the pedido id and from the SEFAZ
+// NF-e number). `number` / `serie` / `accessKey` populate once Tiny
+// confirms SEFAZ has accepted the emission.
+
+enum InvoiceStatus {
+  REQUESTED
+  ISSUED
+  CANCELLED
+  FAILED
+}
+
+model Invoice {
+  id                 String         @id @default(cuid())
+  orderId            String
+  order              Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider           String         @default("tiny")
+  providerInvoiceId  String?
+  number             String?
+  serie              String?
+  accessKey          String?
+  status             InvoiceStatus  @default(REQUESTED)
+  xmlUrl             String?
+  danfeUrl           String?
+  issuedAt           DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  lastError          String?
+  attempts           Int            @default(0)
+  rawPayload         Json?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([provider, providerInvoiceId])
+  @@index([orderId])
+  @@index([status])
+}
+
+// ---------- Shipments (Melhor Envio / carrier-facing) ----------
+// One Shipment row per label purchased. While an order is pre-purchase the
+// chosen-but-unpaid quote lives on Order.shipping{Cents,Carrier,ServiceId}.
+// After "Comprar etiqueta" lands, Shipment becomes authoritative for
+// tracking + status. Order's fields stay populated as a denorm cache.
+
+enum ShipmentStatus {
+  QUOTED
+  PURCHASED
+  PRINTED
+  POSTED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION
+  RETURNED
+  CANCELLED
+}
+
+// ---------- Category audit (keeps /loja filters clean) ----------
+// Products whose name disagrees with their current category land here for
+// review (or auto-apply when `catalog.autoApplyHighConfidence` is on).
+// One row per product — updated in place on every scan pass.
+
+enum CategoryIssueStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+  AUTO_APPLIED
+}
+
+model CategoryAuditIssue {
+  id                  String              @id @default(cuid())
+  productId           String              @unique
+  product             Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  currentCategoryId   String?
+  suggestedCategoryId String?
+  confidence          String              // "high" | "medium" | "low"
+  evidence            Json
+  status              CategoryIssueStatus @default(OPEN)
+  resolvedBy          String?
+  resolvedAt          DateTime?
+  dismissalReason     String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([status, createdAt])
+  @@index([confidence, status])
+}
+
+model Shipment {
+  id                 String          @id @default(cuid())
+  orderId            String
+  order              Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider           String          @default("melhorenvio")
+  providerShipmentId String?         @unique
+  serviceId          String
+  carrier            String
+  priceCents         Int
+  status             ShipmentStatus  @default(PURCHASED)
+  trackingCode       String?
+  trackingUrl        String?
+  labelUrl           String?
+  lastError          String?
+  purchasedAt        DateTime?
+  printedAt          DateTime?
+  postedAt           DateTime?
+  deliveredAt        DateTime?
+  rawPayload         Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([trackingCode])
+}

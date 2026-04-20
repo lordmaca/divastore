@@ -1,0 +1,778 @@
+#!/usr/bin/env bash
+# Brilho de Diva — service management CLI.
+#
+# Wraps the tasks we do most often (start/stop/reload PM2, build, deploy,
+# migrate, view notifications, smoke-test email) with guardrails against
+# touching the sister DivaHub deployment that shares this host.
+#
+# SAFE HARBOR:
+#   - The only PM2 apps this script may control are listed in $BDD_APPS.
+#   - Any subcommand that reloads, restarts, or starts apps verifies that
+#     https://divahub.brilhodediva.com.br returns 307 both before AND after
+#     the action. If it doesn't, the script exits non-zero and tells you.
+#   - No `pm2 save` is run automatically. We've been burned by `pm2 save`
+#     wiping DivaHub entries from the persisted dump.
+#
+# Usage: ./scripts/bdd <command> [args]
+
+set -Eeuo pipefail
+
+# ---- Config -----------------------------------------------------------------
+
+BDD_ROOT="/home/ubuntu/brilhodedivasite"
+BDD_APPS=(
+  "brilhodediva"
+  "brilhodediva-rollup"
+  "brilhodediva-notifications-retry"
+  "brilhodediva-abandoned-cart"
+  "brilhodediva-tiny-stock-sync"
+  "brilhodediva-invoice-poll"
+  "brilhodediva-category-scan"
+)
+MAIN_APP="brilhodediva"
+STOREFRONT_URL="https://loja.brilhodediva.com.br"
+STOREFRONT_IP="163.176.244.199"
+DIVAHUB_URL="https://divahub.brilhodediva.com.br"
+DIVAHUB_EXPECT=307
+
+# ---- Helpers ----------------------------------------------------------------
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+
+die()  { printf "${RED}✘ %s${NC}\n" "$*" >&2; exit 1; }
+ok()   { printf "${GREEN}✓ %s${NC}\n" "$*"; }
+warn() { printf "${YELLOW}⚠ %s${NC}\n" "$*"; }
+info() { printf "${BLUE}→ %s${NC}\n" "$*"; }
+
+require_app() {
+  local name="$1"
+  for a in "${BDD_APPS[@]}"; do
+    [[ "$a" == "$name" ]] && return 0
+  done
+  die "Unknown or protected app: '$name'. Allowed: ${BDD_APPS[*]}"
+}
+
+ensure_root() {
+  [[ -f "$BDD_ROOT/package.json" ]] || die "Expected to run from $BDD_ROOT"
+  cd "$BDD_ROOT"
+}
+
+divahub_check() {
+  local label="${1:-divahub}"
+  local code
+  code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$DIVAHUB_URL" || echo "000")
+  if [[ "$code" != "$DIVAHUB_EXPECT" ]]; then
+    printf "${RED}✘ %s: DivaHub returned %s (expected %s) — refusing to continue${NC}\n" \
+      "$label" "$code" "$DIVAHUB_EXPECT" >&2
+    return 1
+  fi
+  printf "${GREEN}✓ %s: DivaHub OK (%s)${NC}\n" "$label" "$code"
+  return 0
+}
+
+storefront_check() {
+  local code
+  code=$(curl -sS --resolve "loja.brilhodediva.com.br:443:$STOREFRONT_IP" \
+    -o /dev/null -w "%{http_code}" --max-time 10 "$STOREFRONT_URL/api/health" || echo "000")
+  if [[ "$code" != "200" ]]; then
+    printf "${RED}✘ storefront: /api/health returned %s${NC}\n" "$code" >&2
+    return 1
+  fi
+  printf "${GREEN}✓ storefront: healthy (200)${NC}\n"
+  return 0
+}
+
+db_password() {
+  grep DATABASE_URL .env.local | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|'
+}
+
+psql_local() {
+  PGPASSWORD=$(db_password) psql -h 127.0.0.1 -U brilhodediva -d brilhodediva "$@"
+}
+
+pm2_app_exists() {
+  # Returns 0 if the app is known to PM2 (any status), 1 otherwise.
+  local name="$1"
+  pm2 jlist 2>/dev/null | jq -e --arg n "$name" '.[] | select(.name == $n)' >/dev/null
+}
+
+pm2_register_from_ecosystem() {
+  # Start (register) an app by name from ecosystem.config.js without touching
+  # anything else. Using --only keeps DivaHub apps out of the picture since
+  # they live in a different ecosystem file anyway.
+  local name="$1"
+  info "pm2 start ecosystem.config.js --only $name (first-time registration)"
+  pm2 start ecosystem.config.js --only "$name" --update-env
+}
+
+pm2_smart_action() {
+  # Applies an action to one BdD app, registering it from ecosystem.config.js
+  # if PM2 doesn't know it yet. Valid actions: start, restart, reload, stop.
+  local action="$1"
+  local name="$2"
+  require_app "$name"
+
+  if ! pm2_app_exists "$name"; then
+    case "$action" in
+      stop)
+        warn "$name: not registered in PM2 — nothing to stop"
+        return 0
+        ;;
+      *)
+        pm2_register_from_ecosystem "$name"
+        return $?
+        ;;
+    esac
+  fi
+
+  info "pm2 $action $name"
+  pm2 "$action" "$name" --update-env
+}
+
+pm2_action_on_bdd_apps() {
+  # $1 = action (start|stop|restart|reload), $2 = optional specific app
+  local action="$1"
+  local target="${2:-}"
+
+  divahub_check "pre" || die "DivaHub check failed before PM2 action — aborting"
+
+  if [[ -n "$target" ]]; then
+    pm2_smart_action "$action" "$target"
+  else
+    for app in "${BDD_APPS[@]}"; do
+      pm2_smart_action "$action" "$app" || warn "$app: $action failed"
+    done
+  fi
+
+  sleep 3
+  divahub_check "post" || die "DivaHub check failed AFTER PM2 action — investigate immediately"
+  storefront_check || warn "Storefront health check failed — inspect with './scripts/bdd logs'"
+}
+
+cmd_bootstrap() {
+  # Register any BdD app that's missing from PM2. Idempotent — existing apps
+  # are left alone. Intended for first-time setup after pulling a new cron
+  # definition into ecosystem.config.js.
+  ensure_root
+  divahub_check "pre" || die "DivaHub unhealthy — aborting bootstrap"
+
+  local registered=0 skipped=0
+  for app in "${BDD_APPS[@]}"; do
+    if pm2_app_exists "$app"; then
+      ok "$app already registered"
+      ((skipped++)) || true
+    else
+      pm2_register_from_ecosystem "$app"
+      ((registered++)) || true
+    fi
+  done
+
+  echo
+  info "bootstrap done: registered=$registered already-running=$skipped"
+  if (( registered > 0 )); then
+    warn "run './scripts/bdd status' to confirm, then 'pm2 save' ONLY after verifying all DivaHub apps are still in 'pm2 list'"
+  fi
+
+  divahub_check "post" || die "DivaHub check failed AFTER bootstrap — investigate immediately"
+}
+
+# ---- Subcommands ------------------------------------------------------------
+
+cmd_help() {
+  cat <<'EOF'
+Brilho de Diva — service management
+
+Service control (DivaHub-safe):
+  bootstrap               Register any BdD app missing from PM2 (first-time setup)
+  start [app]             Start all BdD apps (or one specific)
+  stop  [app]             Stop all BdD apps (or one specific)
+  restart [app]           Hard restart (drops connections)
+  reload                  Zero-downtime reload of the main app
+  status                  PM2 status for BdD apps + live health
+  logs [app] [n]          Tail logs (default: brilhodediva, 100 lines)
+  logs -f [app]           Stream logs (ctrl-C to exit)
+
+Deployment:
+  build                   Production build (npm run build)
+  typecheck               tsc --noEmit
+  deploy                  Build + reload main app + DivaHub safety verify
+  deploy --skip-build     Reload only, skip build (use when rebuilt already)
+
+Database:
+  migrate <name>          Diff schema → SQL → apply → record (non-interactive)
+  migrate-dry <name>      Print the SQL that would be applied
+  studio                  Open Prisma Studio at http://localhost:5555
+  psql                    Open psql shell into the brilhodediva DB
+  seed                    Run the seed script
+
+Observability:
+  health                  Storefront + DivaHub + DB + email + PM2 summary
+  notifications [n]       Last N notification rows (default 20)
+  failed-notifications    Rows with status=FAILED (retry candidates)
+  funnel                  Today's funnel events count by type
+  retry                   Run notification retry sweeper now
+  abandoned               Run abandoned-cart sweeper now
+
+Stock sync (Tiny ERP):
+  sync-stock              Run Tiny stock reconciliation now (same as 30m cron)
+  sync-stock --dry        Compute plan, print counts, do NOT apply
+  stock-events [n]        Show last N rows of StockSyncEvent (default 30)
+
+Catalog hygiene (category classifier):
+  categorize-scan [--dry] Scan every active product; auto-apply high-confidence
+                          mismatches (when setting is on); open issues otherwise
+  categorize-apply        Apply all OPEN, high-confidence issues now
+  categorize-issues [n]   Show last N OPEN category issues (default 20)
+
+Orders:
+  order <number>          Show order detail (customer, payment, timeline, invoice)
+  events <orderId> [n]    Show last N OrderEvents (default 20)
+  backfill-events         Synthesize OrderEvents for orders predating the timeline
+  delete-order <number> --reason="..."
+                          Soft-delete an order (guardrailed: refuses if NF-e issued,
+                          shipment in flight, or approved payment unrefunded)
+
+Invoices (NF-e / Tiny):
+  invoice <orderNumber>   Trigger NF-e emission now for an order
+  invoice-status <n>      Show the latest Invoice row for order #n
+  invoice-poll            Run the invoice poll sweeper once
+
+Refunds (Mercado Pago):
+  refund <orderNumber> --reason="..." [--amount=R$X]
+                          Refund a payment via MP (full by default, partial with --amount)
+
+Shipping labels (Melhor Envio):
+  label <orderNumber>     Buy a shipping label via Melhor Envio (debits ME balance)
+  shipments [n]           Show last N Shipment rows (default 20)
+
+Diagnostics:
+  test-email <to>         Send a test transactional email
+  smoke                   Curl a short list of storefront routes
+
+Settings migration:
+  migrate-env-to-db       Copy every legacy EMAIL_* / TINY_* / MP_* / MELHORENVIO_*
+                          / DIVAHUB_* / WHATSAPP_* / S3_* env var into SettingsKv
+                          (encrypted). Idempotent — skips keys already in the DB.
+
+Docs / misc:
+  env                     Show which expected env vars are set (values masked)
+  help                    Show this
+EOF
+}
+
+cmd_status() {
+  ensure_root
+  info "PM2 — BdD apps only:"
+  local allow_json
+  allow_json=$(printf '%s\n' "${BDD_APPS[@]}" | jq -R . | jq -sc .)
+  pm2 jlist 2>/dev/null \
+    | jq -r --argjson allow "$allow_json" '
+        .[] | select(.name as $n | $allow | index($n)) |
+        "  \(.name | .[0:34] | .+ (" " * (34 - length)))  " +
+        "\(.pm2_env.status | .[0:9] | .+ (" " * (9 - length)))  " +
+        "\(((.monit.memory // 0) / 1048576 | floor) | tostring | .[0:4] | " "*(4-length) + .)MB  " +
+        "uptime=\(if .pm2_env.pm_uptime then ((now * 1000 - .pm2_env.pm_uptime) / 1000 / 60 | floor | tostring) + "m" else "-" end)"
+      '
+  echo
+  divahub_check "divahub" || true
+  storefront_check || true
+}
+
+cmd_start()   { ensure_root; pm2_action_on_bdd_apps start   "${1:-}"; }
+cmd_stop()    { ensure_root; pm2_action_on_bdd_apps stop    "${1:-}"; }
+cmd_restart() { ensure_root; pm2_action_on_bdd_apps restart "${1:-}"; }
+cmd_reload()  { ensure_root; pm2_action_on_bdd_apps reload  "$MAIN_APP"; }
+
+cmd_logs() {
+  ensure_root
+  local follow=""
+  if [[ "${1:-}" == "-f" ]]; then follow="--lines 0"; shift; fi
+  local app="${1:-$MAIN_APP}"
+  require_app "$app"
+  local n="${2:-100}"
+  if [[ -n "$follow" ]]; then
+    pm2 logs "$app" $follow
+  else
+    pm2 logs "$app" --lines "$n" --nostream
+  fi
+}
+
+cmd_build() {
+  ensure_root
+  info "npm run build"
+  npm run build 2>&1 | tail -20
+  ok "build complete"
+}
+
+cmd_typecheck() {
+  ensure_root
+  info "tsc --noEmit"
+  npm run typecheck
+  ok "typecheck clean"
+}
+
+cmd_deploy() {
+  ensure_root
+  divahub_check "pre" || die "DivaHub unhealthy before deploy — aborting"
+
+  if [[ "${1:-}" != "--skip-build" ]]; then
+    info "npm run build"
+    if ! npm run build 2>&1 | tail -20; then
+      die "Build failed — not reloading"
+    fi
+  else
+    warn "skipping build (--skip-build)"
+  fi
+
+  info "pm2 reload $MAIN_APP --update-env"
+  pm2 reload "$MAIN_APP" --update-env
+  sleep 3
+
+  divahub_check "post" || die "DivaHub broken after reload — investigate immediately"
+  storefront_check || die "Storefront unhealthy after reload"
+  ok "deploy complete"
+}
+
+cmd_migrate() {
+  ensure_root
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "Usage: bdd migrate <migration_name>"
+
+  local ts
+  ts=$(date +%Y%m%d%H%M%S)
+  local dir="prisma/migrations/${ts}_${name}"
+  mkdir -p "$dir"
+
+  info "Diffing schema → SQL"
+  npx prisma migrate diff \
+    --from-config-datasource --to-schema prisma/schema.prisma --script 2>/dev/null \
+    | grep -v "^◇" | grep -v "^Loaded Prisma" > "$dir/migration.sql"
+
+  if [[ ! -s "$dir/migration.sql" ]]; then
+    rmdir "$dir" 2>/dev/null || true
+    die "No changes detected between schema and database"
+  fi
+
+  info "Migration SQL:"
+  sed 's/^/  /' "$dir/migration.sql"
+
+  if grep -qE "^DROP |DROP TABLE|DROP COLUMN" "$dir/migration.sql"; then
+    warn "Destructive statements detected (DROP). Review carefully, then re-run with MIGRATE_CONFIRM=yes"
+    [[ "${MIGRATE_CONFIRM:-}" == "yes" ]] || { rm -rf "$dir"; die "aborted — re-run with MIGRATE_CONFIRM=yes if intentional"; }
+  fi
+
+  info "Applying via psql"
+  PGPASSWORD=$(db_password) psql -h 127.0.0.1 -U brilhodediva -d brilhodediva -f "$dir/migration.sql"
+
+  info "Recording in _prisma_migrations"
+  local checksum
+  checksum=$(sha256sum "$dir/migration.sql" | cut -d' ' -f1)
+  sudo -u postgres psql -d brilhodediva -c "
+    INSERT INTO \"_prisma_migrations\" (id, checksum, finished_at, migration_name, started_at, applied_steps_count)
+    VALUES (gen_random_uuid()::text, '$checksum', now(), '${ts}_${name}', now(), 1);" >/dev/null
+
+  info "Regenerating Prisma client"
+  npx prisma generate 2>&1 | tail -3
+  ok "migration applied: ${ts}_${name}"
+}
+
+cmd_migrate_dry() {
+  ensure_root
+  npx prisma migrate diff \
+    --from-config-datasource --to-schema prisma/schema.prisma --script 2>/dev/null \
+    | grep -v "^◇" | grep -v "^Loaded Prisma"
+}
+
+cmd_studio() {
+  ensure_root
+  info "Prisma Studio → http://localhost:5555 (ctrl-C to stop)"
+  npx prisma studio
+}
+
+cmd_psql() {
+  ensure_root
+  psql_local "$@"
+}
+
+cmd_seed() {
+  ensure_root
+  info "npm run seed"
+  npm run seed
+}
+
+cmd_health() {
+  ensure_root
+  echo "--- DivaHub safe harbor ---"
+  divahub_check || true
+  echo
+  echo "--- Storefront liveness ---"
+  storefront_check || true
+  echo
+  echo "--- Database ---"
+  if psql_local -c "SELECT 1;" >/dev/null 2>&1; then
+    ok "PostgreSQL reachable"
+  else
+    warn "PostgreSQL unreachable — check DATABASE_URL"
+  fi
+  echo
+  echo "--- Email config ---"
+  local missing=()
+  for v in EMAIL_SMTP_HOST EMAIL_SMTP_PORT EMAIL_SMTP_USER EMAIL_SMTP_PASS EMAIL_FROM; do
+    if grep -q "^$v=" .env.local && [[ -n "$(grep "^$v=" .env.local | cut -d= -f2- | tr -d '"'\')" ]]; then
+      ok "$v set"
+    else
+      missing+=("$v")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    warn "missing: ${missing[*]}"
+    warn "emails will be enqueued then SKIPPED with lastError=email_not_configured"
+  fi
+  echo
+  echo "--- PM2 BdD apps ---"
+  cmd_status
+}
+
+cmd_notifications() {
+  ensure_root
+  local n="${1:-20}"
+  psql_local -c "
+    SELECT
+      to_char(\"createdAt\", 'MM-DD HH24:MI') AS at,
+      substring(template, 1, 22) AS template,
+      channel,
+      status,
+      substring(recipient, 1, 28) AS recipient,
+      attempts,
+      substring(COALESCE(\"lastError\", '-'), 1, 40) AS \"lastError\"
+    FROM \"Notification\"
+    ORDER BY \"createdAt\" DESC
+    LIMIT $n;"
+}
+
+cmd_failed_notifications() {
+  ensure_root
+  psql_local -c "
+    SELECT
+      to_char(\"createdAt\", 'MM-DD HH24:MI') AS at,
+      template,
+      channel,
+      attempts,
+      \"lastError\"
+    FROM \"Notification\"
+    WHERE status = 'FAILED'
+    ORDER BY \"updatedAt\" DESC
+    LIMIT 50;"
+}
+
+cmd_funnel() {
+  ensure_root
+  psql_local -c "
+    SELECT type, COUNT(*) AS count
+    FROM \"FunnelEvent\"
+    WHERE \"createdAt\"::date = CURRENT_DATE
+    GROUP BY type
+    ORDER BY count DESC;"
+}
+
+cmd_retry() {
+  ensure_root
+  info "Running retry-notifications sweeper"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/retry-notifications.ts
+}
+
+cmd_abandoned() {
+  ensure_root
+  info "Running abandoned-cart sweeper"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/sweep-abandoned-carts.ts
+}
+
+cmd_sync_stock() {
+  ensure_root
+  local extra=()
+  [[ "${1:-}" == "--dry" || "${1:-}" == "--dry-run" ]] && extra+=("--dry")
+  info "Running Tiny stock sync${extra:+ (${extra[*]})}"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/sync-tiny-stock.ts --source=CLI "${extra[@]}"
+}
+
+cmd_stock_events() {
+  ensure_root
+  local n="${1:-30}"
+  psql_local -c "
+    SELECT
+      to_char(\"createdAt\", 'MM-DD HH24:MI') AS at,
+      sku,
+      \"oldStock\" AS old,
+      \"newStock\" AS new,
+      source
+    FROM \"StockSyncEvent\"
+    ORDER BY \"createdAt\" DESC
+    LIMIT $n;"
+}
+
+cmd_categorize_scan() {
+  ensure_root
+  local extra=()
+  [[ "${1:-}" == "--dry" || "${1:-}" == "--dry-run" ]] && extra+=("--dry")
+  info "Rodando category-scan"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/scan-categories.ts "${extra[@]}"
+}
+
+cmd_categorize_apply() {
+  ensure_root
+  info "Aplicando sugestões de alta confiança"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/categorize-apply-cli.ts
+}
+
+cmd_categorize_issues() {
+  ensure_root
+  local n="${1:-20}"
+  psql_local -c "
+    SELECT to_char(i.\"createdAt\", 'MM-DD HH24:MI') AS at,
+           substring(p.name, 1, 50) AS product,
+           substring(cur.name, 1, 14) AS atual,
+           substring(sug.name, 1, 14) AS sugestao,
+           i.confidence AS conf,
+           i.status
+    FROM \"CategoryAuditIssue\" i
+    JOIN \"Product\" p ON p.id = i.\"productId\"
+    LEFT JOIN \"Category\" cur ON cur.id = i.\"currentCategoryId\"
+    LEFT JOIN \"Category\" sug ON sug.id = i.\"suggestedCategoryId\"
+    WHERE i.status = 'OPEN'
+    ORDER BY i.\"createdAt\" DESC LIMIT $n;"
+}
+
+cmd_order() {
+  ensure_root
+  local num="${1:-}"
+  [[ -n "$num" ]] || die "Usage: bdd order <number>"
+  echo "--- Pedido #$num ---"
+  psql_local -c "
+    SELECT o.id, o.number, o.status, o.\"totalCents\"/100.0 AS total_brl,
+           c.email AS customer, o.\"lastPaymentMethod\" AS method,
+           o.\"lastPaymentStatus\" AS pstatus, o.\"trackingCode\" AS tracking,
+           o.\"tinyOrderId\" AS tiny
+    FROM \"Order\" o LEFT JOIN \"Customer\" c ON c.id = o.\"customerId\"
+    WHERE o.number = $num;"
+  echo "--- Pagamentos ---"
+  psql_local -c "
+    SELECT p.method, p.status, p.\"amountCents\"/100.0 AS bruto,
+           p.\"feeCents\"/100.0 AS taxa, p.\"netReceivedCents\"/100.0 AS liquido,
+           p.\"refundedCents\"/100.0 AS reembolso, p.installments AS parc,
+           p.\"cardLastFour\" AS card4, p.\"paymentTypeId\" AS type
+    FROM \"Payment\" p JOIN \"Order\" o ON o.id = p.\"orderId\"
+    WHERE o.number = $num ORDER BY p.\"createdAt\" DESC;"
+  echo "--- Timeline (últimos 20) ---"
+  psql_local -c "
+    SELECT to_char(e.\"createdAt\", 'YYYY-MM-DD HH24:MI:SS') AS at,
+           e.type, e.actor, substring(COALESCE(e.message, ''), 1, 70) AS message
+    FROM \"OrderEvent\" e JOIN \"Order\" o ON o.id = e.\"orderId\"
+    WHERE o.number = $num
+    ORDER BY e.\"createdAt\" DESC LIMIT 20;"
+}
+
+cmd_events() {
+  ensure_root
+  local oid="${1:-}"
+  [[ -n "$oid" ]] || die "Usage: bdd events <orderId> [n]"
+  local n="${2:-20}"
+  psql_local -c "
+    SELECT to_char(\"createdAt\", 'MM-DD HH24:MI:SS') AS at,
+           type, actor, substring(COALESCE(message, ''), 1, 70) AS message
+    FROM \"OrderEvent\"
+    WHERE \"orderId\" = '$oid'
+    ORDER BY \"createdAt\" DESC LIMIT $n;"
+}
+
+cmd_backfill_events() {
+  ensure_root
+  info "Running order-events backfill"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/backfill-order-events.ts
+}
+
+cmd_invoice() {
+  ensure_root
+  local num="${1:-}"
+  [[ -n "$num" ]] || die "Usage: bdd invoice <orderNumber>"
+  info "Solicitando NF-e para pedido #$num"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/issue-invoice-cli.ts "$num"
+}
+
+cmd_invoice_status() {
+  ensure_root
+  local num="${1:-}"
+  [[ -n "$num" ]] || die "Usage: bdd invoice-status <orderNumber>"
+  psql_local -c "
+    SELECT i.status, i.number, i.serie, i.\"providerInvoiceId\" AS tiny_nf,
+           i.\"issuedAt\", i.attempts,
+           substring(COALESCE(i.\"lastError\", ''), 1, 80) AS last_error
+    FROM \"Invoice\" i JOIN \"Order\" o ON o.id = i.\"orderId\"
+    WHERE o.number = $num
+    ORDER BY i.\"createdAt\" DESC LIMIT 5;"
+}
+
+cmd_invoice_poll() {
+  ensure_root
+  info "Rodando poll-invoices"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/poll-invoices.ts
+}
+
+cmd_refund() {
+  ensure_root
+  [[ -n "${1:-}" ]] || die 'Usage: bdd refund <orderNumber> --reason="..." [--amount=R$X]'
+  info "Reembolsando pagamento"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/refund-cli.ts "$@"
+}
+
+cmd_label() {
+  ensure_root
+  local num="${1:-}"
+  [[ -n "$num" ]] || die "Usage: bdd label <orderNumber>"
+  info "Comprando etiqueta via Melhor Envio"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/buy-label-cli.ts "$num"
+}
+
+cmd_shipments() {
+  ensure_root
+  local n="${1:-20}"
+  psql_local -c "
+    SELECT to_char(s.\"createdAt\", 'MM-DD HH24:MI') AS at,
+           o.number AS order_num,
+           s.carrier, s.\"serviceId\" AS service,
+           s.status,
+           COALESCE(s.\"trackingCode\", '-') AS tracking,
+           s.\"priceCents\"/100.0 AS price_brl
+    FROM \"Shipment\" s JOIN \"Order\" o ON o.id = s.\"orderId\"
+    ORDER BY s.\"createdAt\" DESC LIMIT $n;"
+}
+
+cmd_delete_order() {
+  ensure_root
+  [[ -n "${1:-}" ]] || die 'Usage: bdd delete-order <orderNumber> --reason="..."'
+  info "Excluindo pedido (soft delete)"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/delete-order-cli.ts "$@"
+}
+
+cmd_test_email() {
+  ensure_root
+  local to="${1:-}"
+  [[ -n "$to" ]] || die "Usage: bdd test-email <recipient@example.com>"
+  info "Sending test email to $to"
+  node --env-file=.env.local -e "
+    (async () => {
+      const { sendEmail, emailConfigured } = await import('./lib/notifications/channels/email.ts');
+      if (!(await emailConfigured())) { console.error('SMTP not configured (set via /admin/configuracoes)'); process.exit(1); }
+      await sendEmail({
+        to: '$to',
+        subject: 'Teste — Brilho de Diva',
+        text: 'Este é um e-mail de teste do painel de administração.',
+        html: '<p>Este é um e-mail de teste do painel de administração.</p>',
+      });
+      console.log('ok');
+    })().catch((e) => { console.error(e); process.exit(1); });
+  " 2>&1 || die "send failed — check EMAIL_SMTP_* in .env.local"
+  ok "sent — verify inbox"
+}
+
+cmd_migrate_env_to_db() {
+  ensure_root
+  grep -qE '^SETTINGS_ENCRYPTION_KEY=' .env.local 2>/dev/null \
+    || die "SETTINGS_ENCRYPTION_KEY não encontrado em .env.local — rode a bootstrap primeiro"
+  info "Copiando env vars legadas para SettingsKv (criptografado)"
+  node --env-file=.env.local ./node_modules/.bin/tsx scripts/migrate-env-to-db.ts \
+    || die "falha na migração — veja o erro acima"
+  ok "migração concluída — abra /admin/configuracoes e confirme o estado"
+}
+
+cmd_smoke() {
+  ensure_root
+  info "Curling public routes"
+  local paths=(/ /loja /carrinho /checkout /login /cadastro /recuperar-senha /api/health)
+  for p in "${paths[@]}"; do
+    local code
+    code=$(curl -sS --resolve "loja.brilhodediva.com.br:443:$STOREFRONT_IP" \
+      -o /dev/null -w "%{http_code}" --max-time 8 "$STOREFRONT_URL$p" || echo "000")
+    printf "  %-28s %s\n" "$p" "$code"
+  done
+}
+
+cmd_env() {
+  ensure_root
+  info "env vars seen by bdd (value masked)"
+  for v in \
+    DATABASE_URL AUTH_URL AUTH_TRUST_HOST AUTH_SECRET SETTINGS_ENCRYPTION_KEY \
+    MP_ACCESS_TOKEN MP_WEBHOOK_SECRET MP_PUBLIC_KEY \
+    TINY_API_TOKEN TINY_API_BASE_URL TINY_WEBHOOK_SECRET \
+    DIVAHUB_API_URL DIVAHUB_API_KEY \
+    EMAIL_SMTP_HOST EMAIL_SMTP_PORT EMAIL_SMTP_USER EMAIL_SMTP_PASS EMAIL_FROM EMAIL_REPLY_TO \
+    WHATSAPP_ACCESS_TOKEN WHATSAPP_PHONE_NUMBER_ID \
+    MELHORENVIO_TOKEN MELHORENVIO_ENV MELHORENVIO_WEBHOOK_SECRET \
+    STOREFRONT_DEMO_MODE
+  do
+    local line
+    line=$(grep -E "^$v=" .env.local 2>/dev/null || true)
+    if [[ -n "$line" ]]; then
+      local val="${line#$v=}"
+      val="${val//\"/}"
+      if [[ -n "$val" ]]; then
+        printf "  %-28s ${GREEN}set${NC} (len=%d)\n" "$v" "${#val}"
+      else
+        printf "  %-28s ${YELLOW}empty${NC}\n" "$v"
+      fi
+    else
+      printf "  %-28s ${YELLOW}unset${NC}\n" "$v"
+    fi
+  done
+}
+
+# ---- Entrypoint -------------------------------------------------------------
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help|--help|-h)         cmd_help "$@" ;;
+  status)                  cmd_status "$@" ;;
+  bootstrap)               cmd_bootstrap "$@" ;;
+  start)                   cmd_start "$@" ;;
+  stop)                    cmd_stop "$@" ;;
+  restart)                 cmd_restart "$@" ;;
+  reload)                  cmd_reload "$@" ;;
+  logs)                    cmd_logs "$@" ;;
+  build)                   cmd_build "$@" ;;
+  typecheck)               cmd_typecheck "$@" ;;
+  deploy)                  cmd_deploy "$@" ;;
+  migrate)                 cmd_migrate "$@" ;;
+  migrate-dry)             cmd_migrate_dry "$@" ;;
+  studio)                  cmd_studio "$@" ;;
+  psql)                    cmd_psql "$@" ;;
+  seed)                    cmd_seed "$@" ;;
+  health)                  cmd_health "$@" ;;
+  notifications)           cmd_notifications "$@" ;;
+  failed-notifications)    cmd_failed_notifications "$@" ;;
+  funnel)                  cmd_funnel "$@" ;;
+  retry)                   cmd_retry "$@" ;;
+  abandoned)               cmd_abandoned "$@" ;;
+  sync-stock)              cmd_sync_stock "$@" ;;
+  stock-events)            cmd_stock_events "$@" ;;
+  categorize-scan)         cmd_categorize_scan "$@" ;;
+  categorize-apply)        cmd_categorize_apply "$@" ;;
+  categorize-issues)       cmd_categorize_issues "$@" ;;
+  order)                   cmd_order "$@" ;;
+  events)                  cmd_events "$@" ;;
+  backfill-events)         cmd_backfill_events "$@" ;;
+  invoice)                 cmd_invoice "$@" ;;
+  invoice-status)          cmd_invoice_status "$@" ;;
+  invoice-poll)            cmd_invoice_poll "$@" ;;
+  refund)                  cmd_refund "$@" ;;
+  label)                   cmd_label "$@" ;;
+  shipments)               cmd_shipments "$@" ;;
+  delete-order)            cmd_delete_order "$@" ;;
+  test-email)              cmd_test_email "$@" ;;
+  migrate-env-to-db)       cmd_migrate_env_to_db "$@" ;;
+  smoke)                   cmd_smoke "$@" ;;
+  env)                     cmd_env "$@" ;;
+  *)
+    die "Unknown command: '$cmd'. Run './scripts/bdd help' for the list."
+    ;;
+esac

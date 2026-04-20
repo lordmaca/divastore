@@ -1,0 +1,15 @@
+{
+  "name": "Brilho de Diva",
+  "short_name": "Brilho de Diva",
+  "description": "Joias e acessórios que realçam sua beleza.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4d9ee",
+  "theme_color": "#d23a85",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/apple-icon.svg", "sizes": "180x180", "type": "image/svg+xml" }
+  ]
+}
