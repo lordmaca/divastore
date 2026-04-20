@@ -647,7 +647,8 @@ function HeroSlidesSection({ initial }: { initial: HeroSlides }) {
               </div>
             </div>
             <ImageUpload
-              label="Foto (1920×1080 recomendado)"
+              label="Foto do slide"
+              hint="Tamanho recomendado: 1920 × 1080 px (proporção 16:9). Formatos aceitos: JPG, PNG, WebP, AVIF. Até 8 MB."
               value={s.imageUrl}
               onChange={(v) => updateAt(i, { imageUrl: v })}
               aspect="aspect-video"
@@ -751,7 +752,8 @@ function CampaignSection({ initial }: { initial: CampaignBanner }) {
         onChange={(v) => patch("enabled", v)}
       />
       <ImageUpload
-        label="Foto (1920×600 recomendado)"
+        label="Foto do banner"
+        hint="Tamanho recomendado: 1920 × 600 px (proporção 16:5, horizontal larga). Formatos aceitos: JPG, PNG, WebP, AVIF. Até 8 MB."
         value={draft.imageUrl}
         onChange={(v) => patch("imageUrl", v)}
         aspect="aspect-[16/5]"
@@ -868,6 +870,7 @@ function LookbookSection({ initial }: { initial: Lookbook }) {
           >
             <ImageUpload
               label={`Tile ${i + 1}`}
+              hint="Tamanho recomendado: 800 × 800 px (quadrada, proporção 1:1). Formatos aceitos: JPG, PNG, WebP, AVIF. Até 8 MB."
               value={it.imageUrl}
               onChange={(v) => updateAt(i, { imageUrl: v })}
               aspect="aspect-square"
