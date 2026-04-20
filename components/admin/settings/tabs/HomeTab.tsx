@@ -15,11 +15,13 @@ import {
   useDraft,
 } from "@/components/admin/settings/fields";
 import { saveSettingAction } from "@/lib/admin-actions";
+import { ImageUpload } from "@/components/admin/settings/ImageUpload";
 
 // All five sections of the home editor. Each section saves independently
 // so a partial error doesn't block the rest.
 
 type Hero = {
+  enabled: boolean;
   kicker: string;
   title: string;
   subtitle: string;
@@ -42,6 +44,45 @@ type Newsletter = {
 
 type Reviews = { enabled: boolean; limit: number };
 
+type HeroSlide = {
+  id: string;
+  imageUrl: string;
+  imageAlt?: string;
+  headline: string;
+  sub?: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  activeFrom?: string;
+  activeUntil?: string;
+};
+
+type HeroSlides = { autoplayMs: number; slides: HeroSlide[] };
+
+type CampaignBanner = {
+  enabled: boolean;
+  imageUrl: string;
+  imageAlt: string;
+  headline: string;
+  sub: string;
+  ctaLabel: string;
+  ctaUrl: string;
+};
+
+type LookbookItem = {
+  id: string;
+  imageUrl: string;
+  imageAlt?: string;
+  caption?: string;
+  linkUrl?: string;
+};
+
+type Lookbook = {
+  enabled: boolean;
+  headline: string;
+  sub: string;
+  items: LookbookItem[];
+};
+
 type Category = { slug: string; name: string; productCount: number };
 
 type Props = {
@@ -51,6 +92,9 @@ type Props = {
   badges: Badges;
   newsletter: Newsletter;
   reviews: Reviews;
+  heroSlides: HeroSlides;
+  campaign: CampaignBanner;
+  lookbook: Lookbook;
   availableCategories: Category[];
 };
 
@@ -67,6 +111,7 @@ export function HomeTab(p: Props) {
         detail="Cada bloco salva separado. Use os ajustes abaixo para customizar a home."
       />
 
+      <HeroSlidesSection initial={p.heroSlides} />
       <HeroSection initial={p.hero} />
       <UspSection initial={p.usps} />
       <FeaturedSection
@@ -74,6 +119,8 @@ export function HomeTab(p: Props) {
         availableCategories={p.availableCategories}
       />
       <BadgesSection initial={p.badges} />
+      <CampaignSection initial={p.campaign} />
+      <LookbookSection initial={p.lookbook} />
       <NewsletterSection initial={p.newsletter} />
       <ReviewsSection initial={p.reviews} />
     </div>
@@ -93,6 +140,7 @@ function HeroSection({ initial }: { initial: Hero }) {
       setMsg(null);
       try {
         await saveSettingAction("home.hero", {
+          enabled: draft.enabled,
           kicker: draft.kicker.trim(),
           title: draft.title.trim(),
           subtitle: draft.subtitle.trim(),
@@ -117,8 +165,13 @@ function HeroSection({ initial }: { initial: Hero }) {
   return (
     <SettingsSection
       title="Topo (hero)"
-      description="Sobreletra, título, subtítulo e os dois botões exibidos logo no topo."
+      description="Cartão decorativo exibido no topo. Desative quando substituir por um hero de imagem (Fase 2)."
     >
+      <ToggleField
+        label="Exibir o cartão"
+        value={draft.enabled}
+        onChange={(v) => patch("enabled", v)}
+      />
       <FieldGrid cols={1}>
         <TextField
           label="Sobreletra (kicker)"
@@ -469,6 +522,389 @@ function ReviewsSection({ initial }: { initial: Reviews }) {
           max={6}
         />
       </FieldGrid>
+      <SaveRow dirty={dirty} saving={saving} onSave={save} msg={msg} />
+    </SettingsSection>
+  );
+}
+
+// ---------- Hero slides (rotating full-bleed) ----------
+
+function HeroSlidesSection({ initial }: { initial: HeroSlides }) {
+  const router = useRouter();
+  const [autoplayMs, setAutoplayMs] = useState(initial.autoplayMs);
+  const [slides, setSlides] = useState<HeroSlide[]>(initial.slides);
+  const [saving, startSaving] = useTransition();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const dirty =
+    autoplayMs !== initial.autoplayMs ||
+    JSON.stringify(slides) !== JSON.stringify(initial.slides);
+
+  function updateAt(i: number, patch: Partial<HeroSlide>) {
+    setSlides((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  }
+  function removeAt(i: number) {
+    setSlides((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function addSlide() {
+    if (slides.length >= 5) return;
+    const id = `s-${Date.now().toString(36)}`;
+    setSlides((prev) => [
+      ...prev,
+      {
+        id,
+        imageUrl: "",
+        imageAlt: "",
+        headline: "",
+        sub: "",
+        ctaLabel: "Explorar",
+        ctaUrl: "/loja",
+      },
+    ]);
+  }
+  function move(i: number, dir: -1 | 1) {
+    setSlides((prev) => {
+      const next = [...prev];
+      const j = i + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  }
+
+  function save() {
+    startSaving(async () => {
+      setMsg(null);
+      try {
+        const clean = slides
+          .map((s) => ({
+            ...s,
+            headline: s.headline.trim(),
+            sub: s.sub?.trim() || undefined,
+            imageAlt: s.imageAlt?.trim() || undefined,
+            ctaLabel: s.ctaLabel.trim(),
+            ctaUrl: s.ctaUrl.trim() || "/loja",
+          }))
+          .filter((s) => s.imageUrl && s.headline);
+        await saveSettingAction("home.heroSlides", {
+          autoplayMs: Math.max(2000, Math.min(20000, autoplayMs)),
+          slides: clean,
+        });
+        setSlides(clean);
+        setMsg({ ok: true, text: "Hero rotativo salvo." });
+        router.refresh();
+      } catch (e) {
+        setMsg({ ok: false, text: e instanceof Error ? e.message : "Erro" });
+      }
+    });
+  }
+
+  return (
+    <SettingsSection
+      title="Hero rotativo (Fase 2)"
+      description="Slides com foto full-bleed. Quando houver ao menos um slide ativo, substitui o cartão glass do topo. Até 5 slides. Upload em S3."
+    >
+      {slides.length === 0 ? (
+        <p className="text-sm text-[color:var(--foreground)]/65 italic">
+          Nenhum slide ainda. Adicione o primeiro abaixo.
+        </p>
+      ) : null}
+
+      <ul className="space-y-4">
+        {slides.map((s, i) => (
+          <li
+            key={s.id}
+            className="rounded-2xl bg-white/60 border border-white p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-[color:var(--foreground)]/60">
+                Slide {i + 1}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  className="text-xs px-2 py-0.5 rounded bg-white/60 hover:bg-white disabled:opacity-40"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === slides.length - 1}
+                  className="text-xs px-2 py-0.5 rounded bg-white/60 hover:bg-white disabled:opacity-40"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeAt(i)}
+                  className="text-xs px-2 py-0.5 rounded text-red-600 hover:underline"
+                >
+                  remover
+                </button>
+              </div>
+            </div>
+            <ImageUpload
+              label="Foto (1920×1080 recomendado)"
+              value={s.imageUrl}
+              onChange={(v) => updateAt(i, { imageUrl: v })}
+              aspect="aspect-video"
+            />
+            <FieldGrid cols={1}>
+              <TextField
+                label="Headline"
+                value={s.headline}
+                onChange={(v) => updateAt(i, { headline: v })}
+                placeholder="Nova coleção de colares"
+              />
+              <TextField
+                label="Subtítulo"
+                value={s.sub ?? ""}
+                onChange={(v) => updateAt(i, { sub: v })}
+                placeholder="Peças exclusivas em prata 925"
+              />
+            </FieldGrid>
+            <FieldGrid cols={2}>
+              <TextField
+                label="CTA — texto"
+                value={s.ctaLabel}
+                onChange={(v) => updateAt(i, { ctaLabel: v })}
+              />
+              <TextField
+                label="CTA — URL"
+                value={s.ctaUrl}
+                onChange={(v) => updateAt(i, { ctaUrl: v })}
+                placeholder="/loja?categoria=colares"
+              />
+              <TextField
+                label="Texto alternativo (acessibilidade)"
+                value={s.imageAlt ?? ""}
+                onChange={(v) => updateAt(i, { imageAlt: v })}
+              />
+            </FieldGrid>
+          </li>
+        ))}
+      </ul>
+
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
+          onClick={addSlide}
+          disabled={slides.length >= 5}
+          className="rounded-full bg-white/70 hover:bg-white border border-pink-200 disabled:opacity-50 text-[color:var(--pink-600)] text-xs font-medium px-3 py-1.5"
+        >
+          + adicionar slide
+        </button>
+        <NumberField
+          label="Autoplay (ms)"
+          value={autoplayMs}
+          onChange={setAutoplayMs}
+          min={2000}
+          max={20000}
+        />
+      </div>
+      <SaveRow dirty={dirty} saving={saving} onSave={save} msg={msg} />
+    </SettingsSection>
+  );
+}
+
+// ---------- Campaign banner ----------
+
+function CampaignSection({ initial }: { initial: CampaignBanner }) {
+  const router = useRouter();
+  const { draft, patch, dirty, reset } = useDraft<CampaignBanner>(initial);
+  const [saving, startSaving] = useTransition();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function save() {
+    startSaving(async () => {
+      setMsg(null);
+      try {
+        await saveSettingAction("home.campaignBanner", {
+          enabled: draft.enabled,
+          imageUrl: draft.imageUrl.trim(),
+          imageAlt: draft.imageAlt.trim(),
+          headline: draft.headline.trim(),
+          sub: draft.sub.trim(),
+          ctaLabel: draft.ctaLabel.trim(),
+          ctaUrl: draft.ctaUrl.trim(),
+        });
+        reset(draft);
+        setMsg({ ok: true, text: "Banner de campanha salvo." });
+        router.refresh();
+      } catch (e) {
+        setMsg({ ok: false, text: e instanceof Error ? e.message : "Erro" });
+      }
+    });
+  }
+
+  return (
+    <SettingsSection
+      title="Banner de campanha (Fase 2)"
+      description="Banner horizontal exibido entre destaques e newsletter. Use pra ações sazonais (Dia das Mães, Natal, Black Friday…)."
+    >
+      <ToggleField
+        label="Exibir o banner"
+        value={draft.enabled}
+        onChange={(v) => patch("enabled", v)}
+      />
+      <ImageUpload
+        label="Foto (1920×600 recomendado)"
+        value={draft.imageUrl}
+        onChange={(v) => patch("imageUrl", v)}
+        aspect="aspect-[16/5]"
+      />
+      <FieldGrid cols={1}>
+        <TextField
+          label="Headline"
+          value={draft.headline}
+          onChange={(v) => patch("headline", v)}
+        />
+        <TextField
+          label="Subtítulo"
+          value={draft.sub}
+          onChange={(v) => patch("sub", v)}
+        />
+      </FieldGrid>
+      <FieldGrid cols={2}>
+        <TextField
+          label="CTA — texto"
+          value={draft.ctaLabel}
+          onChange={(v) => patch("ctaLabel", v)}
+        />
+        <TextField
+          label="CTA — URL"
+          value={draft.ctaUrl}
+          onChange={(v) => patch("ctaUrl", v)}
+          placeholder="/loja?colecao=dia-das-maes"
+        />
+        <TextField
+          label="Texto alternativo"
+          value={draft.imageAlt}
+          onChange={(v) => patch("imageAlt", v)}
+        />
+      </FieldGrid>
+      <SaveRow dirty={dirty} saving={saving} onSave={save} msg={msg} />
+    </SettingsSection>
+  );
+}
+
+// ---------- Lookbook ----------
+
+function LookbookSection({ initial }: { initial: Lookbook }) {
+  const router = useRouter();
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [headline, setHeadline] = useState(initial.headline);
+  const [sub, setSub] = useState(initial.sub);
+  const [items, setItems] = useState<LookbookItem[]>(initial.items);
+  const [saving, startSaving] = useTransition();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const dirty =
+    enabled !== initial.enabled ||
+    headline !== initial.headline ||
+    sub !== initial.sub ||
+    JSON.stringify(items) !== JSON.stringify(initial.items);
+
+  function updateAt(i: number, patch: Partial<LookbookItem>) {
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  }
+  function removeAt(i: number) {
+    setItems((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function add() {
+    if (items.length >= 8) return;
+    const id = `l-${Date.now().toString(36)}`;
+    setItems((prev) => [
+      ...prev,
+      { id, imageUrl: "", imageAlt: "", caption: "", linkUrl: "" },
+    ]);
+  }
+
+  function save() {
+    startSaving(async () => {
+      setMsg(null);
+      try {
+        const clean = items
+          .map((it) => ({
+            ...it,
+            imageAlt: it.imageAlt?.trim() || undefined,
+            caption: it.caption?.trim() || undefined,
+            linkUrl: it.linkUrl?.trim() || undefined,
+          }))
+          .filter((it) => it.imageUrl);
+        await saveSettingAction("home.lookbook", {
+          enabled,
+          headline: headline.trim(),
+          sub: sub.trim(),
+          items: clean,
+        });
+        setItems(clean);
+        setMsg({ ok: true, text: "Lookbook salvo." });
+        router.refresh();
+      } catch (e) {
+        setMsg({ ok: false, text: e instanceof Error ? e.message : "Erro" });
+      }
+    });
+  }
+
+  return (
+    <SettingsSection
+      title="Lookbook (Fase 2)"
+      description="Grid editorial com fotos quadradas + caption + link. Ideal pra mostrar looks ou inspirações. Use 4 ou 6 tiles."
+    >
+      <ToggleField label="Exibir o bloco" value={enabled} onChange={setEnabled} />
+      <FieldGrid cols={1}>
+        <TextField label="Headline" value={headline} onChange={setHeadline} />
+        <TextField label="Subtítulo" value={sub} onChange={setSub} />
+      </FieldGrid>
+      <ul className="grid sm:grid-cols-2 gap-3">
+        {items.map((it, i) => (
+          <li
+            key={it.id}
+            className="rounded-2xl bg-white/60 border border-white p-3 space-y-2"
+          >
+            <ImageUpload
+              label={`Tile ${i + 1}`}
+              value={it.imageUrl}
+              onChange={(v) => updateAt(i, { imageUrl: v })}
+              aspect="aspect-square"
+            />
+            <TextField
+              label="Legenda (opcional)"
+              value={it.caption ?? ""}
+              onChange={(v) => updateAt(i, { caption: v })}
+            />
+            <TextField
+              label="Link (opcional)"
+              value={it.linkUrl ?? ""}
+              onChange={(v) => updateAt(i, { linkUrl: v })}
+              placeholder="/loja/produto-slug"
+            />
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={() => removeAt(i)}
+                className="text-xs text-red-600 hover:underline"
+              >
+                remover
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-3 pt-2">
+        <button
+          type="button"
+          onClick={add}
+          disabled={items.length >= 8}
+          className="rounded-full bg-white/70 hover:bg-white border border-pink-200 disabled:opacity-50 text-[color:var(--pink-600)] text-xs font-medium px-3 py-1.5"
+        >
+          + adicionar tile
+        </button>
+      </div>
       <SaveRow dirty={dirty} saving={saving} onSave={save} msg={msg} />
     </SettingsSection>
   );

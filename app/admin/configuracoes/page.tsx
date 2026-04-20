@@ -241,13 +241,16 @@ async function StorageTabServer() {
 }
 
 async function HomeTabServer() {
-  const [hero, usps, featured, badges, newsletter, reviews, cats] = await Promise.all([
+  const [hero, usps, featured, badges, newsletter, reviews, heroSlides, campaign, lookbook, cats] = await Promise.all([
     getSetting("home.hero"),
     getSetting("home.usps"),
     getSetting("home.featuredCategories"),
     getSetting("home.badges"),
     getSetting("home.newsletter"),
     getSetting("home.reviews"),
+    getSetting("home.heroSlides"),
+    getSetting("home.campaignBanner"),
+    getSetting("home.lookbook"),
     prisma.category.findMany({
       select: {
         slug: true,
@@ -265,6 +268,9 @@ async function HomeTabServer() {
       badges={badges}
       newsletter={newsletter}
       reviews={reviews}
+      heroSlides={heroSlides}
+      campaign={campaign}
+      lookbook={lookbook}
       availableCategories={cats.map((c) => ({
         slug: c.slug,
         name: c.name,

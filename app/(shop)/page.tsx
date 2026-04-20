@@ -7,6 +7,9 @@ import { UspBar } from "@/components/home/UspBar";
 import { CategoryStrip } from "@/components/home/CategoryStrip";
 import { NewsletterCard } from "@/components/home/NewsletterCard";
 import { ReviewsWidget } from "@/components/home/ReviewsWidget";
+import { HeroSlider } from "@/components/home/HeroSlider";
+import { CampaignBanner } from "@/components/home/CampaignBanner";
+import { LookbookGrid } from "@/components/home/LookbookGrid";
 import { SITE_URL } from "@/lib/config";
 import { prisma } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
@@ -34,15 +37,45 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const [hero, uspSetting, featuredSetting, badgesSetting, newsletter, reviewsCfg] =
-    await Promise.all([
-      getSetting("home.hero"),
-      getSetting("home.usps"),
-      getSetting("home.featuredCategories"),
-      getSetting("home.badges"),
-      getSetting("home.newsletter"),
-      getSetting("home.reviews"),
-    ]);
+  const [
+    hero,
+    uspSetting,
+    featuredSetting,
+    badgesSetting,
+    newsletter,
+    reviewsCfg,
+    heroSlidesSetting,
+    campaignSetting,
+    lookbookSetting,
+  ] = await Promise.all([
+    getSetting("home.hero"),
+    getSetting("home.usps"),
+    getSetting("home.featuredCategories"),
+    getSetting("home.badges"),
+    getSetting("home.newsletter"),
+    getSetting("home.reviews"),
+    getSetting("home.heroSlides"),
+    getSetting("home.campaignBanner"),
+    getSetting("home.lookbook"),
+  ]);
+
+  // Filter slides by activeFrom/activeUntil at render time. The slider is
+  // the "preferred" hero — when at least one slide is active, the legacy
+  // glass card is suppressed so we don't stack two hero blocks.
+  const now = Date.now();
+  const activeSlides = heroSlidesSetting.slides.filter((s) => {
+    if (!s.imageUrl || !s.headline) return false;
+    if (s.activeFrom) {
+      const from = new Date(s.activeFrom).getTime();
+      if (Number.isFinite(from) && now < from) return false;
+    }
+    if (s.activeUntil) {
+      const until = new Date(s.activeUntil).getTime();
+      if (Number.isFinite(until) && now > until) return false;
+    }
+    return true;
+  });
+  const showLegacyHero = hero.enabled && activeSlides.length === 0;
 
   // Featured products. Badges computed server-side from (createdAt within
   // home.badges.newDays) and (top-N by order volume in last 30d when
@@ -187,6 +220,22 @@ export default async function Home() {
       <JsonLd data={ORG_LD} />
       <JsonLd data={WEBSITE_LD} />
 
+      {activeSlides.length > 0 ? (
+        <HeroSlider
+          slides={activeSlides.map((s) => ({
+            id: s.id,
+            imageUrl: s.imageUrl,
+            imageAlt: s.imageAlt,
+            headline: s.headline,
+            sub: s.sub,
+            ctaLabel: s.ctaLabel,
+            ctaUrl: s.ctaUrl,
+          }))}
+          autoplayMs={heroSlidesSetting.autoplayMs}
+        />
+      ) : null}
+
+      {showLegacyHero ? (
       <section className="flex items-center justify-center px-4 py-12 sm:px-8">
         <div className="relative w-full max-w-3xl">
           <Sparkle className="absolute -top-6 left-6 text-pink-200" size={28} delay="0s" />
@@ -236,6 +285,7 @@ export default async function Home() {
           </div>
         </div>
       </section>
+      ) : null}
 
       <UspBar items={uspSetting.items} />
 
@@ -279,6 +329,25 @@ export default async function Home() {
             })}
           />
         </section>
+      ) : null}
+
+      {campaignSetting.enabled && campaignSetting.imageUrl ? (
+        <CampaignBanner
+          imageUrl={campaignSetting.imageUrl}
+          imageAlt={campaignSetting.imageAlt}
+          headline={campaignSetting.headline}
+          sub={campaignSetting.sub}
+          ctaLabel={campaignSetting.ctaLabel}
+          ctaUrl={campaignSetting.ctaUrl}
+        />
+      ) : null}
+
+      {lookbookSetting.enabled && lookbookSetting.items.length > 0 ? (
+        <LookbookGrid
+          headline={lookbookSetting.headline}
+          sub={lookbookSetting.sub}
+          items={lookbookSetting.items}
+        />
       ) : null}
 
       {reviewsCfg.enabled ? (

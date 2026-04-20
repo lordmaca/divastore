@@ -222,14 +222,16 @@ export const SETTINGS_DEFINITIONS = {
   "home.hero": {
     label: "Home — topo (hero)",
     description:
-      "Texto do hero da home: sobreletra (kicker), título, subtítulo e dois CTAs.",
+      "Cartão do hero da home: sobreletra (kicker), título, subtítulo e dois CTAs. Desative quando quiser esconder o cartão inteiro (ex.: quando tiver um hero de imagem na Fase 2).",
     default: {
+      enabled: true,
       kicker: "Joias feitas para brilhar",
       title: "Brilho de Diva",
       subtitle: "Realce sua Beleza, Brilhe como uma Diva!",
       ctaPrimary: { label: "Explorar a coleção", url: "/loja" },
       ctaSecondary: { label: "Ofertas", url: "/loja?ordenar=mais-vendidos" },
     } as {
+      enabled: boolean;
       kicker: string;
       title: string;
       subtitle: string;
@@ -291,6 +293,88 @@ export const SETTINGS_DEFINITIONS = {
     description:
       "Exibe avaliações recentes dos clientes na home para reforçar prova social. Desative pra esconder a seção.",
     default: { enabled: true, limit: 3 } as { enabled: boolean; limit: number },
+  },
+  "home.heroSlides": {
+    label: "Home — hero rotativo (slides com foto)",
+    description:
+      "Até 5 slides com foto full-bleed, headline e CTA. Quando houver slides ativos, substitui o cartão glass do hero. Use fotos 1920×1080 idealmente.",
+    default: {
+      autoplayMs: 5000,
+      slides: [] as Array<{
+        id: string;
+        imageUrl: string;
+        imageAlt?: string;
+        headline: string;
+        sub?: string;
+        ctaLabel: string;
+        ctaUrl: string;
+        activeFrom?: string;
+        activeUntil?: string;
+      }>,
+    } as {
+      autoplayMs: number;
+      slides: Array<{
+        id: string;
+        imageUrl: string;
+        imageAlt?: string;
+        headline: string;
+        sub?: string;
+        ctaLabel: string;
+        ctaUrl: string;
+        activeFrom?: string;
+        activeUntil?: string;
+      }>;
+    },
+  },
+  "home.campaignBanner": {
+    label: "Home — banner de campanha (intermediário)",
+    description:
+      "Banner horizontal entre o carrossel de destaques e a newsletter. Use pra campanhas sazonais (Dia das Mães, Natal, etc.).",
+    default: {
+      enabled: false,
+      imageUrl: "",
+      imageAlt: "",
+      headline: "",
+      sub: "",
+      ctaLabel: "",
+      ctaUrl: "",
+    } as {
+      enabled: boolean;
+      imageUrl: string;
+      imageAlt: string;
+      headline: string;
+      sub: string;
+      ctaLabel: string;
+      ctaUrl: string;
+    },
+  },
+  "home.lookbook": {
+    label: "Home — lookbook (grid editorial)",
+    description:
+      "Grade de fotos editoriais com caption + link. Use fotos quadradas 800×800. Recomendado: 4 ou 6 tiles.",
+    default: {
+      enabled: false,
+      headline: "Inspire-se",
+      sub: "Looks e combinações que as Divas estão usando",
+      items: [] as Array<{
+        id: string;
+        imageUrl: string;
+        imageAlt?: string;
+        caption?: string;
+        linkUrl?: string;
+      }>,
+    } as {
+      enabled: boolean;
+      headline: string;
+      sub: string;
+      items: Array<{
+        id: string;
+        imageUrl: string;
+        imageAlt?: string;
+        caption?: string;
+        linkUrl?: string;
+      }>;
+    },
   },
 } as const;
 
