@@ -254,6 +254,13 @@ Settings migration:
                           / DIVAHUB_* / WHATSAPP_* / S3_* env var into SettingsKv
                           (encrypted). Idempotent — skips keys already in the DB.
 
+Backup:
+  backup [message]        Snapshot code + Postgres to /home/ubuntu/backups and
+                          push the working tree to GitHub (lordmaca/divastore).
+                          Keeps the last 14 local backups, auto-prunes older.
+  backup --code-only      Skip the DB dump (faster, no pg_dump needed).
+  backup --db-only        Only dump the DB (no git push, no code tar).
+
 Docs / misc:
   env                     Show which expected env vars are set (values masked)
   help                    Show this
@@ -684,6 +691,83 @@ cmd_migrate_env_to_db() {
   ok "migração concluída — abra /admin/configuracoes e confirme o estado"
 }
 
+cmd_backup() {
+  ensure_root
+  local do_code=1 do_db=1 msg=""
+  local BACKUP_DIR="/home/ubuntu/backups"
+  local KEEP=14 # last 14 local snapshots
+
+  for arg in "$@"; do
+    case "$arg" in
+      --code-only) do_db=0 ;;
+      --db-only)   do_code=0 ;;
+      *)           msg="$arg" ;;
+    esac
+  done
+
+  mkdir -p "$BACKUP_DIR"
+  local ts; ts=$(date +%Y%m%d-%H%M%S)
+
+  # --- Local code tarball (excludes node_modules, .next, logs, backups,
+  # lib/generated — everything in .gitignore + a few extras).
+  if [[ $do_code -eq 1 ]]; then
+    local tar_path="$BACKUP_DIR/brilhodediva-code-$ts.tar.gz"
+    info "→ Snapshot do código: $tar_path"
+    tar -czf "$tar_path" \
+      --exclude='./node_modules' \
+      --exclude='./.next' \
+      --exclude='./logs' \
+      --exclude='./backups' \
+      --exclude='./lib/generated' \
+      --exclude='./.git' \
+      --exclude='./*.tsbuildinfo' \
+      -C "$BDD_ROOT" . \
+      && ok "code tarball $(du -h "$tar_path" | cut -f1)" \
+      || { warn "tarball do código falhou"; do_code=0; }
+  fi
+
+  # --- Postgres dump
+  if [[ $do_db -eq 1 ]]; then
+    local dump_path="$BACKUP_DIR/brilhodediva-db-$ts.sql.gz"
+    info "→ Dump Postgres: $dump_path"
+    PGPASSWORD=$(db_password) pg_dump -h 127.0.0.1 -U brilhodediva \
+      --no-owner --no-privileges brilhodediva \
+      | gzip > "$dump_path" \
+      && ok "db dump $(du -h "$dump_path" | cut -f1)" \
+      || { warn "pg_dump falhou"; rm -f "$dump_path"; }
+  fi
+
+  # --- Prune old local backups (keep last $KEEP of each kind)
+  info "→ Prune local: mantendo últimos $KEEP snapshots"
+  ls -1t "$BACKUP_DIR"/brilhodediva-code-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+  ls -1t "$BACKUP_DIR"/brilhodediva-db-*.sql.gz     2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+
+  # --- GitHub push (only on a full or --code-only run; --db-only skips)
+  if [[ $do_code -eq 1 ]]; then
+    local token repo commit_msg
+    token=$(grep "^GITHUB_TOKEN=" .env.local 2>/dev/null | cut -d= -f2-)
+    repo=$(grep "^GITHUB_REPO=" .env.local 2>/dev/null | cut -d= -f2-)
+    if [[ -z "$token" || -z "$repo" ]]; then
+      warn "GITHUB_TOKEN ou GITHUB_REPO ausente em .env.local — pulo o push pro GitHub"
+    else
+      commit_msg="${msg:-backup: $ts}"
+      info "→ Commit + push (GitHub $repo)"
+      git add -A
+      if git diff --cached --quiet; then
+        info "sem mudanças para commitar — push só do HEAD atual"
+      else
+        git commit -m "$commit_msg" --quiet
+      fi
+      git push "https://x-access-token:${token}@github.com/${repo}.git" HEAD:main 2>&1 \
+        | grep -vE "^(Enumerating|Counting|Delta|Compressing|Writing|remote: |To https)" \
+        || true
+      ok "push concluído"
+    fi
+  fi
+
+  ok "backup $ts concluído"
+}
+
 cmd_smoke() {
   ensure_root
   info "Curling public routes"
@@ -770,6 +854,7 @@ case "$cmd" in
   delete-order)            cmd_delete_order "$@" ;;
   test-email)              cmd_test_email "$@" ;;
   migrate-env-to-db)       cmd_migrate_env_to_db "$@" ;;
+  backup)                  cmd_backup "$@" ;;
   smoke)                   cmd_smoke "$@" ;;
   env)                     cmd_env "$@" ;;
   *)
