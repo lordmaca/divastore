@@ -12,6 +12,7 @@ type Item = {
   name: string;
   images: Array<{ url: string; alt?: string | null }>;
   fromCents: number;
+  badge?: "new" | "bestseller" | null;
 };
 
 // Landing-page featured carousel. Auto-advances every 4s, pauses on hover /
@@ -128,7 +129,15 @@ function FeaturedTile({ item, isActive }: { item: Item; isActive: boolean }) {
             sem imagem
           </div>
         ) : null}
-        {isActive ? (
+        {item.badge ? (
+          <span
+            className={`absolute top-3 left-3 rounded-full text-white text-[10px] uppercase tracking-wider font-semibold px-2.5 py-1 shadow ${
+              item.badge === "bestseller" ? "bg-amber-500" : "bg-emerald-500"
+            }`}
+          >
+            {item.badge === "bestseller" ? "Mais vendido" : "Novo"}
+          </span>
+        ) : isActive ? (
           <span className="absolute top-3 left-3 rounded-full bg-[color:var(--pink-500)] text-white text-xs font-semibold px-3 py-1 shadow">
             Destaque
           </span>

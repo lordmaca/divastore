@@ -21,6 +21,7 @@ import { SeoTab } from "@/components/admin/settings/tabs/SeoTab";
 import { NavigationTab } from "@/components/admin/settings/tabs/NavigationTab";
 import { CatalogTab } from "@/components/admin/settings/tabs/CatalogTab";
 import { BootstrapTab } from "@/components/admin/settings/tabs/BootstrapTab";
+import { HomeTab } from "@/components/admin/settings/tabs/HomeTab";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,7 @@ const TABS: SettingsTab[] = [
   { slug: "divahub", label: "DivaHub", icon: "✨", section: "integrações" },
   { slug: "whatsapp", label: "WhatsApp", icon: "💬", section: "integrações" },
   { slug: "storage", label: "Armazenamento", icon: "🗄", section: "integrações" },
+  { slug: "home", label: "Home", icon: "🏠", section: "loja" },
   { slug: "store", label: "Loja", icon: "🏬", section: "loja" },
   { slug: "seo", label: "SEO", icon: "🔎", section: "loja" },
   { slug: "navigation", label: "Navegação", icon: "🧭", section: "loja" },
@@ -71,6 +73,7 @@ export default async function ConfiguracoesPage({
         {activeSlug === "divahub" ? <DivahubTabServer /> : null}
         {activeSlug === "whatsapp" ? <WhatsAppTabServer /> : null}
         {activeSlug === "storage" ? <StorageTabServer /> : null}
+        {activeSlug === "home" ? <HomeTabServer /> : null}
         {activeSlug === "store" ? <StoreTabServer /> : null}
         {activeSlug === "seo" ? <SeoTabServer /> : null}
         {activeSlug === "navigation" ? <NavigationTabServer /> : null}
@@ -233,6 +236,40 @@ async function StorageTabServer() {
         publicConfigured: publicOk,
         privateConfigured: privateOk,
       }}
+    />
+  );
+}
+
+async function HomeTabServer() {
+  const [hero, usps, featured, badges, newsletter, reviews, cats] = await Promise.all([
+    getSetting("home.hero"),
+    getSetting("home.usps"),
+    getSetting("home.featuredCategories"),
+    getSetting("home.badges"),
+    getSetting("home.newsletter"),
+    getSetting("home.reviews"),
+    prisma.category.findMany({
+      select: {
+        slug: true,
+        name: true,
+        _count: { select: { products: { where: { active: true } } } },
+      },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  return (
+    <HomeTab
+      hero={hero}
+      usps={usps}
+      featured={featured}
+      badges={badges}
+      newsletter={newsletter}
+      reviews={reviews}
+      availableCategories={cats.map((c) => ({
+        slug: c.slug,
+        name: c.name,
+        productCount: c._count.products,
+      }))}
     />
   );
 }

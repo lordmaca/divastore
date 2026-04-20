@@ -219,6 +219,79 @@ export const SETTINGS_DEFINITIONS = {
       env: "sandbox" | "production";
     },
   },
+  "home.hero": {
+    label: "Home — topo (hero)",
+    description:
+      "Texto do hero da home: sobreletra (kicker), título, subtítulo e dois CTAs.",
+    default: {
+      kicker: "Joias feitas para brilhar",
+      title: "Brilho de Diva",
+      subtitle: "Realce sua Beleza, Brilhe como uma Diva!",
+      ctaPrimary: { label: "Explorar a coleção", url: "/loja" },
+      ctaSecondary: { label: "Ofertas", url: "/loja?ordenar=mais-vendidos" },
+    } as {
+      kicker: string;
+      title: string;
+      subtitle: string;
+      ctaPrimary: { label: string; url: string };
+      ctaSecondary: { label: string; url: string };
+    },
+  },
+  "home.usps": {
+    label: "Home — barra de benefícios (USP bar)",
+    description:
+      "Até 4 benefícios exibidos em faixa logo abaixo do hero. icon é um emoji; text a frase curta.",
+    default: {
+      items: [
+        { icon: "🚚", text: "Frete grátis acima de R$ 300" },
+        { icon: "💳", text: "Até 12x no cartão" },
+        { icon: "🔄", text: "Troca grátis em 7 dias" },
+        { icon: "✨", text: "Prata 925 e garantia de 1 ano" },
+      ],
+    } as {
+      items: Array<{ icon: string; text: string }>;
+    },
+  },
+  "home.featuredCategories": {
+    label: "Home — categorias em destaque",
+    description:
+      "Slugs das categorias mostradas em tiles na home. Vazio = detecta automaticamente as 4 categorias com mais produtos ativos.",
+    default: { slugs: [] as string[] } as { slugs: string[] },
+  },
+  "home.badges": {
+    label: "Home — badges no carousel de destaques",
+    description:
+      "Regras para marcar produtos com 'Novo' (criados nos últimos N dias) e 'Mais vendido' (top 3 por pedidos no último mês).",
+    default: {
+      newDays: 30,
+      showBestseller: true,
+    } as {
+      newDays: number;
+      showBestseller: boolean;
+    },
+  },
+  "home.newsletter": {
+    label: "Home — bloco newsletter",
+    description:
+      "Seção de captura de e-mail com cupom de boas-vindas. Desative se não quiser exibir.",
+    default: {
+      enabled: true,
+      headline: "Ganhe 10% OFF na primeira compra",
+      sub: "Entre pra lista e receba as novidades, promoções e inspirações — direto na sua caixa.",
+      couponCode: "BEMVINDA10",
+    } as {
+      enabled: boolean;
+      headline: string;
+      sub: string;
+      couponCode: string;
+    },
+  },
+  "home.reviews": {
+    label: "Home — bloco de avaliações",
+    description:
+      "Exibe avaliações recentes dos clientes na home para reforçar prova social. Desative pra esconder a seção.",
+    default: { enabled: true, limit: 3 } as { enabled: boolean; limit: number },
+  },
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS_DEFINITIONS;
