@@ -169,8 +169,16 @@ export async function tinyBuscarProdutoPorSku(sku: string): Promise<TinyProdutoS
   return null;
 }
 
-// Exponential backoff retry wrapper. Only retries on network / Tiny 5xx —
-// NOT on TinyError codes like "produto não encontrado" which must propagate.
+// Exponential backoff retry wrapper. Retries on:
+//   - network errors
+//   - Tiny HTTP 5xx
+//   - Tiny "API Bloqueada" (rate-limit — Tiny v2 caps 60 req/min).
+// NOT retried: TinyError codes like "produto não encontrado" which carry
+// real semantics and must propagate.
+//
+// Rate-limit gets a longer base delay than other failures because Tiny's
+// throttle window is measured in minutes: a 500ms retry would just trip
+// the limit again.
 export async function withRetry<T>(
   fn: () => Promise<T>,
   opts: { tries?: number; baseMs?: number } = {},
@@ -183,13 +191,18 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
-      const isRetriable =
+      const isHttp5xx =
         err instanceof TinyError && /HTTP 5\d\d/.test(err.message);
+      const isRateLimited =
+        err instanceof TinyError && /API Bloqueada|Excedido.*acessos/i.test(err.message);
       const isNetwork =
         err instanceof Error && !(err instanceof TinyError);
-      if (!isRetriable && !isNetwork) throw err;
+      if (!isHttp5xx && !isRateLimited && !isNetwork) throw err;
       if (i === tries - 1) break;
-      await new Promise((r) => setTimeout(r, baseMs * Math.pow(3, i)));
+      const delay = isRateLimited
+        ? 8000 * Math.pow(2, i) // 8s, 16s
+        : baseMs * Math.pow(3, i); // 500ms, 1.5s, 4.5s
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw lastErr;

@@ -6,9 +6,8 @@ import { getSetting } from "@/lib/settings";
 export type Input = {
   source: StockSyncSource;
   // SKU → current Tiny stock value. `null` means "Tiny explicitly has no
-  // such SKU" (reconciler treats as 0 when authoritative). SKUs NOT present
-  // in the map are either left alone (`authoritative: false`) or treated as
-  // 0 (`authoritative: true`).
+  // such SKU". SKUs NOT present in the map are either left alone
+  // (`authoritative: false`) or treated as 0 (`authoritative: true`).
   snapshot: Map<string, number | null>;
   authoritative: boolean;
   runId?: string | null;
@@ -23,6 +22,12 @@ export type Outcome =
       changed: number;
       zeroed: number;
       unchanged: number;
+      // Variant-era safety: when NO variant of a product resolved in Tiny
+      // (every snapshot entry was null), we assume the admin hasn't yet
+      // registered the variants in Tiny and we preserve local stock. The
+      // count surfaces in IntegrationRun so the admin knows to register.
+      skippedProductsNotInTiny: number;
+      skippedProducts: Array<{ productId: string; slug: string; variants: string[] }>;
       diffs: Array<{ sku: string; from: number; to: number }>;
     }
   | {
@@ -34,7 +39,13 @@ export type Outcome =
     }
   | { ok: false; reason: "no_active_variants" };
 
-type ActiveVariant = { id: string; sku: string; stock: number };
+type ActiveVariant = {
+  id: string;
+  sku: string;
+  stock: number;
+  productId: string;
+  productSlug: string;
+};
 
 function proposeStock(
   currentStock: number,
@@ -49,16 +60,43 @@ function proposeStock(
 
 export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
   const active = await prisma.$queryRaw<ActiveVariant[]>`
-    SELECT v.id, v.sku, v.stock
+    SELECT v.id, v.sku, v.stock, v."productId" AS "productId", p.slug AS "productSlug"
     FROM "Variant" v
     JOIN "Product" p ON p.id = v."productId"
     WHERE p.active = true
   `;
   if (active.length === 0) return { ok: false, reason: "no_active_variants" };
 
+  // ---- Variant-era safety: products where NO variant was found in Tiny
+  // should not be zeroed out; they're simply not registered in Tiny yet.
+  // This check only engages on authoritative runs — webhook deltas don't
+  // imply "we asked for it and Tiny said no," so skipping is moot there.
+  const productHasAnyMatch = new Map<string, boolean>();
+  const productSlugs = new Map<string, string>();
+  const productVariants = new Map<string, string[]>();
+  for (const v of active) {
+    productSlugs.set(v.productId, v.productSlug);
+    const bucket = productVariants.get(v.productId) ?? [];
+    bucket.push(v.sku);
+    productVariants.set(v.productId, bucket);
+
+    const snap = input.snapshot.get(v.sku);
+    const hasMatch = typeof snap === "number";
+    if (hasMatch) productHasAnyMatch.set(v.productId, true);
+    else if (!productHasAnyMatch.has(v.productId)) productHasAnyMatch.set(v.productId, false);
+  }
+
+  const skippedProductIds = new Set<string>();
+  if (input.authoritative) {
+    for (const [productId, anyMatch] of productHasAnyMatch) {
+      if (!anyMatch) skippedProductIds.add(productId);
+    }
+  }
+
   const diffs: Array<{ sku: string; from: number; to: number; variantId: string }> = [];
   let proposedZeros = 0;
   for (const v of active) {
+    if (skippedProductIds.has(v.productId)) continue;
     const proposed = proposeStock(v.stock, input.snapshot.get(v.sku), input.authoritative);
     if (proposed !== v.stock) {
       diffs.push({ sku: v.sku, from: v.stock, to: proposed, variantId: v.id });
@@ -66,20 +104,30 @@ export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
     }
   }
 
-  // Safety guard only engages on authoritative runs — a partial webhook
-  // delta wouldn't usually breach threshold, but we still check to block a
-  // Tiny "mass-zero" event.
+  // Safety guard still engages — catches "Tiny returned 0 for everything"
+  // pathological cases. Skipped (not-in-Tiny) products are excluded from
+  // the denominator so a single-product catalog with no Tiny records
+  // doesn't trip the threshold permanently.
   const threshold = (await getSetting("stock.tinySyncSafetyThresholdPct")).pct;
-  const pctZeroed = (proposedZeros / active.length) * 100;
+  const consideredActive = active.length - [...skippedProductIds].reduce((n, pid) => {
+    return n + (productVariants.get(pid)?.length ?? 0);
+  }, 0);
+  const pctZeroed = consideredActive > 0 ? (proposedZeros / consideredActive) * 100 : 0;
   if (proposedZeros > 0 && pctZeroed > threshold) {
     return {
       ok: false,
       reason: "safety_threshold",
       proposedZeros,
-      totalActive: active.length,
+      totalActive: consideredActive,
       thresholdPct: threshold,
     };
   }
+
+  const skippedProducts = [...skippedProductIds].map((pid) => ({
+    productId: pid,
+    slug: productSlugs.get(pid) ?? "",
+    variants: productVariants.get(pid) ?? [],
+  }));
 
   if (input.dryRun) {
     return {
@@ -88,7 +136,9 @@ export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
       processed: active.length,
       changed: diffs.length,
       zeroed: proposedZeros,
-      unchanged: active.length - diffs.length,
+      unchanged: active.length - diffs.length - skippedProducts.reduce((n, p) => n + p.variants.length, 0),
+      skippedProductsNotInTiny: skippedProducts.length,
+      skippedProducts,
       diffs: diffs.map(({ sku, from, to }) => ({ sku, from, to })),
     };
   }
@@ -120,7 +170,9 @@ export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
     processed: active.length,
     changed: diffs.length,
     zeroed: proposedZeros,
-    unchanged: active.length - diffs.length,
+    unchanged: active.length - diffs.length - skippedProducts.reduce((n, p) => n + p.variants.length, 0),
+    skippedProductsNotInTiny: skippedProducts.length,
+    skippedProducts,
     diffs: diffs.map(({ sku, from, to }) => ({ sku, from, to })),
   };
 }
@@ -133,7 +185,11 @@ export function summarize(o: Outcome): string {
     }
     return `aborted: ${o.reason}`;
   }
-  return `${o.dryRun ? "(dry) " : ""}processed=${o.processed} changed=${o.changed} zeroed=${o.zeroed}`;
+  const skippedNote =
+    o.skippedProductsNotInTiny > 0
+      ? ` · skipped ${o.skippedProductsNotInTiny} produto(s) sem match no Tiny`
+      : "";
+  return `${o.dryRun ? "(dry) " : ""}processed=${o.processed} changed=${o.changed} zeroed=${o.zeroed}${skippedNote}`;
 }
 
 // Prisma.InputJsonValue-typed payload for IntegrationRun.

@@ -13,8 +13,12 @@ export async function buildFullCatalogSnapshot(opts: {
   snapshot: Map<string, number | null>;
   errors: Array<{ sku: string; message: string }>;
 }> {
-  const chunkSize = opts.chunkSize ?? 20;
-  const chunkDelayMs = opts.chunkDelayMs ?? 300;
+  // Tiny v2 free tier = 60 req/min. Each SKU lookup = 2 HTTP hits
+  // (pesquisa + obter.estoque). Default pace = ~10 SKUs per second worth
+  // of HTTP hits, with a 1.2s breather between chunks — plus withRetry's
+  // rate-limit backoff handles occasional overruns gracefully.
+  const chunkSize = opts.chunkSize ?? 5;
+  const chunkDelayMs = opts.chunkDelayMs ?? 1200;
 
   const variants = await prisma.$queryRaw<{ sku: string }[]>`
     SELECT v.sku

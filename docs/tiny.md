@@ -64,9 +64,25 @@ Tiny v2 doesn't push stock webhooks natively — this endpoint is ready for Tiny
 - **Admin**: `/admin/integrations` → Tiny card → "Sincronizar agora" (or "Simular" for dry-run). Runs authoritatively, tags the trail with `source=ADMIN_MANUAL`.
 - **CLI**: `./scripts/bdd sync-stock` (or `sync-stock --dry`).
 
-## Safety guard
+## Variant SKUs — matching requirement
 
-[`SettingsKv`](../lib/settings.ts) key `stock.tinySyncSafetyThresholdPct` (default `30`). If an **authoritative** run proposes to zero more than this percentage of the active catalog in a single execution, it aborts and writes `IntegrationRun(status="safety_threshold")`. Zero row written.
+Every `Variant.sku` on the storefront must exist as its own product in Tiny. The sync iterates per variant; it does NOT walk a parent→children relationship (Tiny v2's "grade" feature is not used).
+
+Typical SKU shapes the storefront receives from DivaHub:
+
+- `DIVA-000042-T15` / `DIVA-000042-T18` / `DIVA-000042-TREG` — ring sizes
+- `DIVA-000042-MDOURADO` / `DIVA-000042-MPRATEADO` / `DIVA-000042-MROSEGOLD` — materials
+
+Each of these needs a matching product in Tiny with `codigo = <SKU>`.
+
+**Safety:** if NO variant of a product resolves in Tiny (every lookup returned "not found"), the reconciler treats the product as "not tracked by Tiny yet" and **preserves** the local stock. `skippedProductsNotInTiny` in the `IntegrationRun.payload` surfaces how many products are in that state. Fix by either:
+
+1. Registering each variant SKU as a Tiny product, OR
+2. Unchecking the product's `active` flag on the storefront until the Tiny side is in sync.
+
+## Safety guard (mass-zero protection)
+
+[`SettingsKv`](../lib/settings.ts) key `stock.tinySyncSafetyThresholdPct` (default `30`). If an **authoritative** run proposes to zero more than this percentage of the *matched* catalog in a single execution (products skipped for "not in Tiny" are excluded from the denominator), it aborts and writes `IntegrationRun(status="safety_threshold")`. Zero row written.
 
 This protects against:
 
