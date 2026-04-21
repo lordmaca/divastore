@@ -35,12 +35,14 @@ const upsertSchema = z.object({
   // (DivaHub's own id) — at most one must resolve.
   productId: z.string().max(60).optional().nullable(),
   productExternalId: z.string().max(120).optional().nullable(),
-  imageUrl: z.string().url().max(500),
+  // 2000 chars covers the universal safe HTTP URL length; OCI/S3 signed
+  // URLs and long object-key paths easily break past 500.
+  imageUrl: z.string().url().max(2000),
   imageAlt: z.string().max(300).optional().nullable(),
   headline: z.string().min(1).max(200),
   sub: z.string().max(300).optional().nullable(),
   ctaLabel: z.string().min(1).max(60),
-  ctaUrl: z.string().min(1).max(300),
+  ctaUrl: z.string().min(1).max(500),
   activeFrom: isoDate,
   activeUntil: isoDate,
 });

@@ -87,12 +87,12 @@ Missing / invalid → `401`. Server not configured → `403`. Rate limit is
 | `externalId` | string (1–120) | yes | DivaHub's id. Stable per slide. Keep one slide per product → reuse id across re-publishes. |
 | `productExternalId` | string (1–120) | optional | Maps to `Product.externalId` — the slide only shows while that product has stock. Pass `null` / omit for a "campaign" slide not tied to a product. |
 | `productId` | string (cuid) | optional | Storefront-native product id. Alternative to `productExternalId`. At most one must be set. |
-| `imageUrl` | url, ≤ 500 chars | yes | Must be publicly GET-able. Prefer CDN URL. |
+| `imageUrl` | url, ≤ 2000 chars | yes | Must be publicly GET-able. Prefer CDN URL. Signed URLs with long query strings are OK up to 2k chars. |
 | `imageAlt` | string, ≤ 300 chars | optional | pt-BR. Used for a11y + SEO. |
 | `headline` | string (1–200) | yes | pt-BR. ≤ 42 chars recommended for overlay legibility. |
 | `sub` | string, ≤ 300 chars | optional | pt-BR. ≤ 140 chars recommended. |
 | `ctaLabel` | string (1–60) | yes | pt-BR. 1–3 words recommended. |
-| `ctaUrl` | string (1–300) | yes | Path, not absolute URL (`/loja`, `/loja?categoria=…`). |
+| `ctaUrl` | string (1–500) | yes | Path, not absolute URL (`/loja`, `/loja?categoria=…`). |
 | `activeFrom` | ISO 8601 | optional | Slide hides before this date. |
 | `activeUntil` | ISO 8601 | optional | Slide hides after this date. |
 
