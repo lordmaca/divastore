@@ -1,17 +1,23 @@
 import { prisma } from "@/lib/db";
 import { TinyError, tinyGetStockBySku } from "./http";
 
-// Builds the SKU → Tiny stock map for the entire active catalog. Returns
-// the map plus a list of SKUs Tiny failed on. Callers decide what to do
-// with failures: the cron treats any failure as "don't run authoritative
-// reconcile" since we can't distinguish "missing from Tiny" from "Tiny
-// couldn't tell us."
+// Builds the SKU → Tiny stock map for the entire active catalog. Returns:
+//   - snapshot: Map<sku, number | null> (found, with/without stock)
+//   - errors[]: HARD failures (auth/5xx/net). Cron treats these as
+//       "abort — can't tell missing apart from unreachable".
+//   - unreachable[]: SOFT failures (rate-limit). Cron tolerates these —
+//       the affected SKUs keep their current stock until the next run.
+//
+// The split matters for rate-limit specifically: Tiny v2 caps 60 req/min,
+// and each SKU is 2 hits. Occasional overruns happen even with backoff,
+// and we don't want a 1-SKU blip to abort the whole reconcile.
 export async function buildFullCatalogSnapshot(opts: {
   chunkSize?: number;
   chunkDelayMs?: number;
 } = {}): Promise<{
   snapshot: Map<string, number | null>;
   errors: Array<{ sku: string; message: string }>;
+  unreachable: Array<{ sku: string; message: string }>;
 }> {
   // Tiny v2 free tier = 60 req/min. Each SKU lookup = 2 HTTP hits
   // (pesquisa + obter.estoque). Default pace = ~10 SKUs per second worth
@@ -30,6 +36,7 @@ export async function buildFullCatalogSnapshot(opts: {
 
   const snapshot = new Map<string, number | null>();
   const errors: Array<{ sku: string; message: string }> = [];
+  const unreachable: Array<{ sku: string; message: string }> = [];
 
   for (let i = 0; i < variants.length; i += chunkSize) {
     const chunk = variants.slice(i, i + chunkSize);
@@ -47,7 +54,11 @@ export async function buildFullCatalogSnapshot(opts: {
             : err instanceof Error
               ? err.message
               : String(err);
-        errors.push({ sku: v.sku, message: msg });
+        if (/API Bloqueada|Excedido.*acessos/i.test(msg)) {
+          unreachable.push({ sku: v.sku, message: msg });
+        } else {
+          errors.push({ sku: v.sku, message: msg });
+        }
       }
     }
     if (i + chunkSize < variants.length) {
@@ -55,5 +66,5 @@ export async function buildFullCatalogSnapshot(opts: {
     }
   }
 
-  return { snapshot, errors };
+  return { snapshot, errors, unreachable };
 }

@@ -10,6 +10,10 @@ export type Input = {
   // (`authoritative: false`) or treated as 0 (`authoritative: true`).
   snapshot: Map<string, number | null>;
   authoritative: boolean;
+  // SKUs the caller knows were unreachable during the fetch (e.g. Tiny
+  // rate-limit). Their local stock is preserved — we skip them for this
+  // run and they'll re-check on the next one.
+  unreachableSkus?: Set<string>;
   runId?: string | null;
   dryRun?: boolean;
 };
@@ -95,8 +99,12 @@ export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
 
   const diffs: Array<{ sku: string; from: number; to: number; variantId: string }> = [];
   let proposedZeros = 0;
+  const unreachable = input.unreachableSkus ?? new Set<string>();
   for (const v of active) {
     if (skippedProductIds.has(v.productId)) continue;
+    // Preserve stock for SKUs that were unreachable this run (rate-limit
+    // etc.). They'll re-check on the next run when Tiny's window resets.
+    if (unreachable.has(v.sku)) continue;
     const proposed = proposeStock(v.stock, input.snapshot.get(v.sku), input.authoritative);
     if (proposed !== v.stock) {
       diffs.push({ sku: v.sku, from: v.stock, to: proposed, variantId: v.id });

@@ -44,11 +44,12 @@ async function main() {
   });
 
   try {
-    const { snapshot, errors } = await buildFullCatalogSnapshot();
+    const { snapshot, errors, unreachable } = await buildFullCatalogSnapshot();
+
+    // Hard failures (auth/5xx/net) abort the run — "missing from Tiny"
+    // would be indistinguishable from "Tiny unavailable," and the
+    // storefront could be wiped.
     if (errors.length > 0) {
-      // We can't safely run authoritative if any SKU was unreachable —
-      // "missing from Tiny" would be indistinguishable from "Tiny
-      // unavailable," and the storefront could be wiped.
       await prisma.integrationRun.update({
         where: { id: run.id },
         data: {
@@ -59,6 +60,7 @@ async function main() {
             source,
             errors: errors.slice(0, 20),
             errorCount: errors.length,
+            unreachableCount: unreachable.length,
           },
         },
       });
@@ -66,9 +68,19 @@ async function main() {
       process.exit(1);
     }
 
+    // Soft failures (rate-limit) are tolerated — those SKUs keep their
+    // current stock for this run and get re-checked on the next cron.
+    const unreachableSkus = new Set(unreachable.map((u) => u.sku));
+    if (unreachable.length > 0) {
+      console.warn(
+        `[tiny-stock] rate-limited on ${unreachable.length} SKU(s) — preserving their stock; will retry next cron`,
+      );
+    }
+
     const outcome = await reconcileStockFromTiny({
       source,
       snapshot,
+      unreachableSkus,
       authoritative: true,
       runId: run.id,
       dryRun: dry,
