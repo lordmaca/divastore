@@ -169,6 +169,106 @@ export async function tinyBuscarProdutoPorSku(sku: string): Promise<TinyProdutoS
   return null;
 }
 
+// Paginated product listing via `produtos.pesquisa.php` without a
+// `pesquisa=` filter — returns every registered product in the Tiny
+// account, up to 100 per page. When the account has `saldo` exposed in
+// the search response (default on v2 setups), this single endpoint gives
+// us SKU + stock in one round trip per 100 SKUs — massively cheaper than
+// the per-SKU `obter.estoque.php` loop when we're syncing the whole
+// catalog. Rate-limited the same way as other endpoints (60 req/min).
+export type TinyProdutoListItem = {
+  id: string;
+  codigo: string;
+  /** Total saldo across depots when Tiny includes it in the search. */
+  saldo: number | null;
+};
+
+export type TinyProdutoListPage = {
+  items: TinyProdutoListItem[];
+  /** Total number of pages reported by Tiny (1-based). */
+  totalPages: number;
+};
+
+function parseSaldo(raw: unknown): number | null {
+  if (raw === null || raw === undefined) return null;
+  const n = typeof raw === "string" ? parseFloat(raw) : (raw as number);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.floor(n));
+}
+
+function normalizeListItem(raw: unknown): TinyProdutoListItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  const inner =
+    p.produto && typeof p.produto === "object"
+      ? (p.produto as Record<string, unknown>)
+      : p;
+  const codigo = typeof inner.codigo === "string" ? inner.codigo : null;
+  const id = inner.id != null ? String(inner.id) : null;
+  if (!codigo || !id) return null;
+  // Tiny has used multiple keys historically: `saldo`, `estoque_saldo`,
+  // `saldo_atual`. Try them all.
+  const saldo = parseSaldo(
+    inner.saldo ?? inner.estoque_saldo ?? inner.saldo_atual ?? null,
+  );
+  return { id, codigo, saldo };
+}
+
+export async function tinyListProductsPage(
+  pagina: number,
+): Promise<TinyProdutoListPage> {
+  const cfg = await loadTinyConfig();
+  if (!cfg.token) throw new TinyError("Tiny API token not configured");
+  const body = new URLSearchParams({
+    token: cfg.token,
+    formato: "JSON",
+    pagina: String(pagina),
+    // `situacao=A` restricts to active products — we don't care about
+    // Tiny-side drafts or archived items for stock reconciliation.
+    situacao: "A",
+  });
+  const res = await fetch(`${cfg.baseUrl}/produtos.pesquisa.php`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  if (!res.ok) throw new TinyError(`Tiny HTTP ${res.status} on produtos.pesquisa.php`);
+
+  const json = (await res.json()) as {
+    retorno?: {
+      status?: string;
+      erros?: Array<{ erro?: string }>;
+      codigo_erro?: string;
+      numero_paginas?: number | string;
+      paginas?: number | string;
+      produtos?: unknown;
+      registros?: { produtos?: unknown; produto?: unknown };
+    };
+  };
+  const retorno = json.retorno ?? {};
+  if (retorno.status && retorno.status !== "OK") {
+    const msg =
+      retorno.erros?.map((e) => e.erro ?? "").join("; ") || "Tiny returned non-OK";
+    if (/n[aã]o.*(encontrad|retornou)/i.test(msg)) {
+      return { items: [], totalPages: 0 };
+    }
+    throw new TinyError(msg, retorno.codigo_erro);
+  }
+
+  const rawList = (retorno.produtos ??
+    retorno.registros?.produtos ??
+    retorno.registros?.produto ??
+    []) as unknown[];
+  const items: TinyProdutoListItem[] = [];
+  for (const raw of rawList) {
+    const item = normalizeListItem(raw);
+    if (item) items.push(item);
+  }
+  const totalPagesRaw = retorno.numero_paginas ?? retorno.paginas ?? pagina;
+  const totalPages = Number(totalPagesRaw) || pagina;
+  return { items, totalPages };
+}
+
 // Exponential backoff retry wrapper. Retries on:
 //   - network errors
 //   - Tiny HTTP 5xx
@@ -237,6 +337,20 @@ export async function tinyGetStockBySku(sku: string): Promise<number | null> {
   const estoque = await withRetry(() => fetchEstoqueById(String(exact.id)));
   if (!estoque) return 0;
 
+  const raw = estoque.saldo ?? 0;
+  const n = typeof raw === "string" ? parseFloat(raw) : raw;
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+// Per-product stock lookup by Tiny's internal product id. Exported so the
+// bulk-sync path can skip the pesquisa hop when it already mapped SKU→id.
+// Returns the stock count, or `null` when Tiny says the product doesn't
+// exist. Throws `TinyError` on transport / auth / rate-limit — callers
+// must distinguish those from "not found".
+export async function tinyGetStockByProductId(id: string): Promise<number | null> {
+  const estoque = await fetchEstoqueById(id);
+  if (!estoque) return null;
   const raw = estoque.saldo ?? 0;
   const n = typeof raw === "string" ? parseFloat(raw) : raw;
   if (!Number.isFinite(n)) return 0;
