@@ -184,14 +184,16 @@ async function LogisticsTabServer() {
 }
 
 async function DivahubTabServer() {
-  const [outbound, apiKey, inboundApiKey] = await Promise.all([
+  const [outbound, divinha, apiKey, inboundApiKey] = await Promise.all([
     getSetting("divahub.outbound"),
+    getSetting("divinha.enabled"),
     getSecretStatus("divahub.apiKey"),
     getSecretStatus("divahub.inboundApiKey"),
   ]);
   return (
     <DivahubTab
       outbound={outbound}
+      divinha={divinha}
       secrets={{ apiKey, inboundApiKey }}
     />
   );

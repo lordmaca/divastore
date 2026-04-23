@@ -148,6 +148,7 @@ model Customer {
   wishlistItems    WishlistItem[]
   notifications    Notification[]
   resetTokens      PasswordResetToken[]
+  chatConversations ChatConversation[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 }
@@ -784,4 +785,66 @@ model HeroSlide {
   @@index([enabled])
   @@index([productId])
   @@index([source])
+}
+
+// ---------- Divinha chat ----------
+// DivaHub is the source of truth for conversation logs (see §9 of
+// lib/integration/divahub/DIVINHA_API_CONTRACT.md). Storefront mirrors the
+// thread locally so the widget can render history on reopen without a
+// network round-trip, and so the admin has visibility without DivaHub admin
+// access. Bodies may lag DivaHub by milliseconds — always prefer DivaHub's
+// inbox for audits.
+
+enum ChatConversationStatus {
+  OPEN
+  CLOSED
+  HANDOFF
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ChatConversation {
+  id            String                 @id @default(cuid())
+  // DivaHub-minted conversation id — the join key for cross-system lookup.
+  externalId    String                 @unique
+  customerId    String?
+  customer      Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  sessionKey    String?
+  status        ChatConversationStatus @default(OPEN)
+  lastMessageAt DateTime               @default(now())
+  messageCount  Int                    @default(0)
+  messages      ChatMessage[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([customerId])
+  @@index([sessionKey])
+  @@index([status, lastMessageAt(sort: Desc)])
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // DivaHub-minted message id. Null for user turns minted storefront-side.
+  externalId     String?
+  role           ChatMessageRole
+  // One of: text | product_carousel | quick_replies | cart_preview | link
+  kind           String           @default("text")
+  // Plain text body (null when kind != "text" — structured data lives in payload).
+  content        String?
+  // Shape depends on kind; e.g. { products: [{slug, variantSku, reason}] }.
+  payload        Json?
+  // Array of Action emitted on this turn (assistant messages only).
+  actions        Json?
+  // DivaHub turnId for cross-system trace correlation.
+  turnId         String?
+  tokensOut      Int?
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId, createdAt])
 }

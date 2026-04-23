@@ -11,6 +11,7 @@ import {
 import {
   SecretField,
   TextField,
+  ToggleField,
   useDraft,
 } from "@/components/admin/settings/fields";
 import {
@@ -27,6 +28,7 @@ type SecretStatus = {
 
 type Props = {
   outbound: { url: string };
+  divinha: { enabled: boolean };
   secrets: {
     apiKey: SecretStatus;
     inboundApiKey: SecretStatus;
@@ -40,6 +42,8 @@ export function DivahubTab(p: Props) {
   });
   const [saving, startSaving] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [divinhaEnabled, setDivinhaEnabled] = useState(p.divinha.enabled);
+  const [divinhaSaving, startDivinhaSaving] = useTransition();
 
   const outboundConfigured = Boolean(draft.url && p.secrets.apiKey.configured);
   const inboundConfigured = p.secrets.inboundApiKey.configured;
@@ -93,7 +97,8 @@ export function DivahubTab(p: Props) {
             type="url"
             value={draft.url}
             onChange={(v) => patch("url", v)}
-            placeholder="https://divahub.brilhodediva.com.br/api"
+            placeholder="https://divahub.brilhodediva.com.br"
+            description="Apenas a origem (sem /api no final). Os caminhos da API já começam com /api/public/…"
           />
           <SecretField
             label="Chave de API"
@@ -124,6 +129,31 @@ export function DivahubTab(p: Props) {
             ) : null}
           </div>
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Divinha (chat IA no site)"
+        description="Widget flutuante no storefront que conversa com a cliente, recomenda produtos e monta o carrinho. Usa a Divinha do DivaHub por baixo — requer URL e chave de saída acima configuradas."
+      >
+        <ToggleField
+          label="Divinha ligada no site"
+          description="Se desligado, o botão flutuante some imediatamente e /api/chat/turn responde 503. Use como kill switch se o DivaHub estiver instável."
+          value={divinhaEnabled}
+          onChange={(v) => {
+            setDivinhaEnabled(v);
+            startDivinhaSaving(async () => {
+              try {
+                await saveSettingAction("divinha.enabled", { enabled: v });
+                router.refresh();
+              } catch {
+                setDivinhaEnabled(!v);
+              }
+            });
+          }}
+        />
+        {divinhaSaving ? (
+          <p className="text-xs text-[color:var(--foreground)]/60 mt-1">Salvando…</p>
+        ) : null}
       </SettingsSection>
 
       <SettingsSection

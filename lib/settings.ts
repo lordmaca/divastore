@@ -72,6 +72,12 @@ export const SETTINGS_DEFINITIONS = {
       "URL da API pública do DivaHub. Usada em imports de catálogo outbound. A chave de API é um segredo armazenado separadamente.",
     default: { url: "" } as { url: string },
   },
+  "divinha.enabled": {
+    label: "Divinha — assistente de IA no site",
+    description:
+      "Liga/desliga o widget de chat da Divinha no storefront. Se desligado, o botão flutuante some e a rota /api/chat/turn responde 503. Use como kill switch se o DivaHub estiver instável.",
+    default: { enabled: false } as { enabled: boolean },
+  },
   "s3.config": {
     label: "Armazenamento — configuração",
     description:
