@@ -22,6 +22,7 @@ import { NavigationTab } from "@/components/admin/settings/tabs/NavigationTab";
 import { CatalogTab } from "@/components/admin/settings/tabs/CatalogTab";
 import { BootstrapTab } from "@/components/admin/settings/tabs/BootstrapTab";
 import { HomeTab } from "@/components/admin/settings/tabs/HomeTab";
+import { AboutTab } from "@/components/admin/settings/tabs/AboutTab";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ const TABS: SettingsTab[] = [
   { slug: "whatsapp", label: "WhatsApp", icon: "💬", section: "integrações" },
   { slug: "storage", label: "Armazenamento", icon: "🗄", section: "integrações" },
   { slug: "home", label: "Home", icon: "🏠", section: "loja" },
+  { slug: "about", label: "Sobre nós", icon: "💖", section: "loja" },
   { slug: "store", label: "Loja", icon: "🏬", section: "loja" },
   { slug: "seo", label: "SEO", icon: "🔎", section: "loja" },
   { slug: "navigation", label: "Navegação", icon: "🧭", section: "loja" },
@@ -74,6 +76,7 @@ export default async function ConfiguracoesPage({
         {activeSlug === "whatsapp" ? <WhatsAppTabServer /> : null}
         {activeSlug === "storage" ? <StorageTabServer /> : null}
         {activeSlug === "home" ? <HomeTabServer /> : null}
+        {activeSlug === "about" ? <AboutTabServer /> : null}
         {activeSlug === "store" ? <StoreTabServer /> : null}
         {activeSlug === "seo" ? <SeoTabServer /> : null}
         {activeSlug === "navigation" ? <NavigationTabServer /> : null}
@@ -240,6 +243,11 @@ async function StorageTabServer() {
       }}
     />
   );
+}
+
+async function AboutTabServer() {
+  const about = await getSetting("about.page");
+  return <AboutTab initial={about} />;
 }
 
 async function HomeTabServer() {

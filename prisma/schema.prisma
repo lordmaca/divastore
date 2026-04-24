@@ -848,3 +848,60 @@ model ChatMessage {
 
   @@index([conversationId, createdAt])
 }
+
+// ---------- Observability ----------
+// Site-level alerting. `Alert` is the deduplicated, email-dispatchable event.
+// `CronHeartbeat` is a last-run-status table scheduled scripts write into via
+// lib/observability/heartbeat.ts — the admin dashboard uses it to detect
+// missed runs.
+
+enum AlertSeverity {
+  INFO
+  WARN
+  ERROR
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  // Dedupe key — e.g. "integration:divahub_divinha:turn:error",
+  // "backup:daily:stale", "cron:backup-daily:missed". New occurrences of
+  // the same signature bump occurrences + lastSeenAt instead of piling up.
+  signature   String        @unique
+  category    String // integration | backup | cron | site_health | security
+  severity    AlertSeverity @default(WARN)
+  title       String
+  message     String
+  context     Json?
+  firstSeenAt DateTime      @default(now())
+  lastSeenAt  DateTime      @default(now())
+  occurrences Int           @default(1)
+  // resolvedAt null = active. Set by the admin "resolver" or auto-cleared by
+  // the scanner when the underlying condition clears (e.g. new successful
+  // run after a stretch of failures).
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  // emailedAt null = email not yet dispatched for the current burst. Reset
+  // to null when the alert re-fires after being resolved. Cooldown window
+  // is enforced by the emailer, not this column.
+  emailedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([resolvedAt, lastSeenAt(sort: Desc)])
+  @@index([category, lastSeenAt(sort: Desc)])
+}
+
+model CronHeartbeat {
+  // Name of the scheduled script — e.g. "backup-daily", "alert-scanner".
+  name        String    @id
+  // Human-friendly cron expression copied from ecosystem.config.js at write
+  // time. Makes the admin dashboard self-documenting.
+  schedule    String?
+  lastStartAt DateTime?
+  lastRunAt   DateTime  @default(now())
+  lastStatus  String // ok | error
+  lastError   String?
+  durationMs  Int?
+  runCount    Int       @default(0)
+  updatedAt   DateTime  @updatedAt
+}

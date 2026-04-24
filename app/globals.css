@@ -49,7 +49,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sparkle {
+  .sparkle,
+  .divinha-breath,
+  .divinha-halo,
+  .divinha-wink {
     animation: none !important;
   }
 }
@@ -62,3 +65,29 @@ body {
 .sparkle {
   animation: sparkle-twinkle 3.4s ease-in-out infinite;
 }
+
+/* Divinha chat bubble — gentle "alive" motion. Breath is always on; the
+ * halo pulse ripples outward; the wink is a short attention-grab that
+ * re-fires every ~9s. Keep amplitudes small so it never feels spammy. */
+
+@keyframes divinha-breath {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+@keyframes divinha-halo {
+  0%   { transform: scale(0.9); opacity: 0.55; }
+  80%  { transform: scale(1.9); opacity: 0; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+
+@keyframes divinha-wink {
+  0%, 88%, 100%   { transform: rotate(0deg) scale(1); }
+  91%             { transform: rotate(-8deg) scale(1.08); }
+  94%             { transform: rotate(6deg)  scale(1.08); }
+  97%             { transform: rotate(-3deg) scale(1.04); }
+}
+
+.divinha-breath { animation: divinha-breath 3.6s ease-in-out infinite; }
+.divinha-halo   { animation: divinha-halo   2.6s ease-out      infinite; }
+.divinha-wink   { animation: divinha-wink   9s   ease-in-out   infinite; }

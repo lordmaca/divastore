@@ -78,6 +78,109 @@ export const SETTINGS_DEFINITIONS = {
       "Liga/desliga o widget de chat da Divinha no storefront. Se desligado, o botão flutuante some e a rota /api/chat/turn responde 503. Use como kill switch se o DivaHub estiver instável.",
     default: { enabled: false } as { enabled: boolean },
   },
+  "alerts.config": {
+    label: "Observabilidade — alertas por e-mail",
+    description:
+      "Destinatários e limites do sistema de alertas. O scanner roda a cada 15 minutos e envia um e-mail consolidado quando detecta falhas de integração, backup atrasado, cron parado ou banco fora do ar. Respeita um cooldown por alerta — não spamma.",
+    default: {
+      enabled: true,
+      recipients: [
+        "vpapa@pelotongroup.com",
+        "viniciuspapa@gmail.com",
+        "adm@brilhodediva.com.br",
+      ],
+      // Minutos entre re-envios de e-mail do mesmo alerta ativo.
+      emailCooldownMinutes: 60,
+      // Nº de falhas consecutivas (mesma adapter+operation) até disparar um alerta.
+      integrationFailureStreak: 3,
+      // Janela máxima sem backup bem-sucedido antes de alertar (horas).
+      backupMaxAgeHours: 26,
+      // Janela máxima sem heartbeat de cron antes de alertar (multiplicador
+      // sobre o intervalo esperado da própria cron, mínimo 30 min).
+      cronMaxMissedMultiplier: 2,
+    } as {
+      enabled: boolean;
+      recipients: string[];
+      emailCooldownMinutes: number;
+      integrationFailureStreak: number;
+      backupMaxAgeHours: number;
+      cronMaxMissedMultiplier: number;
+    },
+  },
+  "about.page": {
+    label: "Página Sobre nós",
+    description:
+      "Conteúdo da página /sobre. Mídia: uma foto ou vídeo da loja física. Para vídeo, cole a URL do YouTube ou do arquivo mp4.",
+    default: {
+      enabled: true,
+      heading: "Sobre nós",
+      tagline: "Da nossa vitrine em Mauá para o Brasil inteiro — com carinho.",
+      story:
+        "Somos da cidade de Mauá, SP. Nossa loja fica no Shopping Nova Estação e abrimos as portas no dia 25 de maio de 2025. Desde então, temos um propósito só: levar inovação por meio de produtos de qualidade e preço acessível — primeiro para a gente daqui, e agora para o Brasil todo.",
+      media: {
+        type: "none" as "image" | "video" | "none",
+        url: "",
+        alt: "Loja Brilho de Diva no Shopping Nova Estação",
+      },
+      pillars: [
+        {
+          icon: "✨",
+          title: "Qualidade",
+          description:
+            "Semi-joias em aço inox 316L e prata 925, testadas e selecionadas por quem usa.",
+        },
+        {
+          icon: "💞",
+          title: "Preço acessível",
+          description:
+            "Porque brilhar não precisa doer no bolso. Cada peça é pensada para caber no dia a dia.",
+        },
+        {
+          icon: "🌟",
+          title: "Inovação",
+          description:
+            "Novidades toda semana, atendimento humano e a Divinha (nossa IA) pronta para ajudar.",
+        },
+      ],
+      visit: {
+        storeName: "Brilho de Diva — Shopping Nova Estação",
+        address: "Shopping Nova Estação",
+        city: "Mauá",
+        state: "SP",
+        openingDateIso: "2025-05-25",
+        hours: "Seg a Sáb, 10h às 22h · Dom, 14h às 20h",
+        mapUrl: "",
+        shoppingUrl: "",
+      },
+      contact: {
+        whatsapp: "",
+        instagram: "",
+        email: "contato@brilhodediva.com.br",
+      },
+    } as {
+      enabled: boolean;
+      heading: string;
+      tagline: string;
+      story: string;
+      media: {
+        type: "image" | "video" | "none";
+        url: string;
+        alt: string;
+      };
+      pillars: Array<{ icon: string; title: string; description: string }>;
+      visit: {
+        storeName: string;
+        address: string;
+        city: string;
+        state: string;
+        openingDateIso: string;
+        hours: string;
+        mapUrl: string;
+        shoppingUrl: string;
+      };
+      contact: { whatsapp: string; instagram: string; email: string };
+    },
+  },
   "s3.config": {
     label: "Armazenamento — configuração",
     description:

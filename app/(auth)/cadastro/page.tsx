@@ -29,10 +29,34 @@ export default async function CadastroPage({
     "use server";
     const h = await headers();
     const ip = getClientIp(h);
+    const startedAt = Date.now();
+
+    // Log every registration attempt to IntegrationRun so /admin and the
+    // observability scanner can spot outages. We deliberately don't store
+    // email / name — status + duration + (optionally) error message is
+    // enough to detect outages without retaining PII.
+    const logAttempt = async (
+      status: string,
+      error?: string,
+    ): Promise<void> => {
+      await prisma.integrationRun
+        .create({
+          data: {
+            adapter: "auth",
+            operation: "register",
+            status,
+            durationMs: Date.now() - startedAt,
+            error: error?.slice(0, 500),
+          },
+        })
+        .catch(() => undefined);
+    };
+
     // Per-IP bucket: 5 signups per hour; per-email bucket: 3 attempts per day.
     // The email bucket blocks enumeration-by-spam regardless of IP rotation.
     const ipLimit = rateLimit(`cadastro:ip:${ip}`, { capacity: 5, refillPerSecond: 5 / 3600 });
     if (!ipLimit.ok) {
+      await logAttempt("rate_limited_ip");
       redirect(`/cadastro?error=rate${next ? `&next=${encodeURIComponent(next)}` : ""}`);
     }
 
@@ -44,12 +68,14 @@ export default async function CadastroPage({
       whatsappOptIn: formData.get("whatsappOptIn") === "on",
     });
     if (!parsed.success) {
+      await logAttempt("validation_failed", parsed.error.issues.map((i) => i.path.join(".")).join(","));
       redirect(`/cadastro?error=invalid${next ? `&next=${encodeURIComponent(next)}` : ""}`);
     }
     const { name, email, password, marketingOptIn, whatsappOptIn } = parsed.data;
 
     const emailLimit = rateLimit(`cadastro:email:${email}`, { capacity: 3, refillPerSecond: 3 / 86400 });
     if (!emailLimit.ok) {
+      await logAttempt("rate_limited_email");
       // Generic bounce — don't reveal whether the bucket was hit by the real
       // owner or an enumerator. Same message as the rate path.
       redirect(`/cadastro?error=rate${next ? `&next=${encodeURIComponent(next)}` : ""}`);
@@ -58,6 +84,7 @@ export default async function CadastroPage({
     const passwordHash = await hash(password, 10);
     const now = new Date();
     let createdId: string | null = null;
+    let finalStatus: "ok" | "claimed_guest" = "ok";
 
     // Check if this email is already taken by a guest-checkout customer
     // (row exists but no passwordHash). If so, we "claim" that row — set
@@ -65,11 +92,18 @@ export default async function CadastroPage({
     // preserved. If the row has a passwordHash, signup must not overwrite
     // it (that would be account takeover); we fall back to the generic
     // anti-enumeration redirect.
-    const existing = await prisma.customer.findUnique({
-      where: { email },
-      select: { id: true, passwordHash: true },
-    });
+    let existing: { id: string; passwordHash: string | null } | null = null;
+    try {
+      existing = await prisma.customer.findUnique({
+        where: { email },
+        select: { id: true, passwordHash: true },
+      });
+    } catch (err) {
+      await logAttempt("db_error", err instanceof Error ? err.message : String(err));
+      throw err;
+    }
     if (existing?.passwordHash) {
+      await logAttempt("email_taken");
       redirect(`/login?error=1${next ? `&next=${encodeURIComponent(next)}` : ""}`);
     }
 
@@ -87,6 +121,7 @@ export default async function CadastroPage({
           },
         });
         createdId = existing.id;
+        finalStatus = "claimed_guest";
       } else {
         const created = await prisma.customer.create({
           data: {
@@ -106,10 +141,14 @@ export default async function CadastroPage({
       // Race: another request just claimed this email between the check
       // above and the insert. Same anti-enumeration redirect.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        await logAttempt("race_conflict");
         redirect(`/login?error=1${next ? `&next=${encodeURIComponent(next)}` : ""}`);
       }
+      await logAttempt("db_error", err instanceof Error ? err.message : String(err));
       throw err;
     }
+
+    await logAttempt(finalStatus);
 
     // Fire-and-forget welcome email. Never let a mail outage break signup.
     await sendSafe({

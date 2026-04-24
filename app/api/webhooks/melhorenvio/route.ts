@@ -49,20 +49,35 @@ const STATUS_MAP: Record<string, ShipmentStatus> = {
   canceled: ShipmentStatus.CANCELLED,
 };
 
-async function verifySig(raw: string, sig: string | null): Promise<{ ok: boolean; configured: boolean }> {
+type VerifyResult = {
+  ok: boolean;
+  // Secret exists in DB — if false, handler is in "setup window" mode.
+  configured: boolean;
+  // Signature header was actually presented on the request. When false,
+  // treat the request as a registration/validation ping rather than a
+  // tampering attempt — ME's initial webhook validator (E-WBH-*) sends
+  // unsigned test POSTs and only starts signing once the URL is approved.
+  presented: boolean;
+};
+
+async function verifySig(raw: string, sig: string | null): Promise<VerifyResult> {
   const secret = await getSecret("melhorenvio.webhookSecret");
-  if (!secret) return { ok: false, configured: false };
-  if (!sig) return { ok: false, configured: true };
+  if (!secret) return { ok: false, configured: false, presented: Boolean(sig) };
+  if (!sig) return { ok: false, configured: true, presented: false };
   const cleaned = sig.replace(/^sha256=/i, "").trim();
   const expected = crypto.createHmac("sha256", secret).update(raw, "utf8").digest();
   let provided: Buffer;
   try {
     provided = Buffer.from(cleaned, /^[0-9a-f]+$/i.test(cleaned) ? "hex" : "base64");
   } catch {
-    return { ok: false, configured: true };
+    return { ok: false, configured: true, presented: true };
   }
-  if (provided.length !== expected.length) return { ok: false, configured: true };
-  return { ok: crypto.timingSafeEqual(expected, provided), configured: true };
+  if (provided.length !== expected.length) return { ok: false, configured: true, presented: true };
+  return {
+    ok: crypto.timingSafeEqual(expected, provided),
+    configured: true,
+    presented: true,
+  };
 }
 
 function normalizeEntry(e: Record<string, unknown>): {
@@ -130,16 +145,21 @@ export async function POST(req: NextRequest) {
 
   const verification = await verifySig(raw, sig);
   if (!verification.ok) {
-    // When the secret isn't cadastrated yet (setup window), accept ME's
-    // test POST with 200 so the panel lets the admin save the webhook.
-    // Do NOT process entries — we can't trust them without a signature.
-    if (!verification.configured) {
+    // Accept the test/validation POST with 200 when the signature header
+    // was NOT presented (E-WBH-0002 validator) or when the secret isn't
+    // cadastrated yet — the ME panel needs a 200 to approve the URL, and
+    // no entries are processed in this branch so nothing untrusted hits
+    // the DB. Only reject with 401 when a signature header was present
+    // AND did not verify (real tampering attempt).
+    if (!verification.configured || !verification.presented) {
       await prisma.integrationRun.create({
         data: {
           adapter: "melhorenvio",
           operation: "webhook",
           status: "registration_ping",
-          error: "secret not configured — accepted as setup ping, entries ignored",
+          error: !verification.configured
+            ? "secret not configured — accepted as setup ping, entries ignored"
+            : "no signature header — accepted as validation ping, entries ignored",
           payload: { event: payload?.event ?? null, entries: entries.length },
         },
       });

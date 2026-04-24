@@ -183,33 +183,56 @@ export async function bulkProductAction(
     return { ok: true, affected: res.count, skipped: [] };
   }
 
-  // delete: guard against products with past order history (OrderItem → Variant
-  // has no cascade, so a raw delete would fail at the DB level).
+  // delete: OrderItem and CartItem both reference Variant with onDelete
+  // RESTRICT, so the cascade `Product → Variant` would fail if anything
+  // points at a variant. We MUST preserve order history (skip those
+  // products), but cart items are ephemeral session scratch — it's safe
+  // to wipe them so abandoned guest carts don't block admin intent.
   const targets = await prisma.product.findMany({
     where: { id: { in: unique } },
     select: {
       id: true,
       slug: true,
-      variants: { select: { _count: { select: { orderItems: true } } } },
+      variants: {
+        select: {
+          id: true,
+          _count: { select: { orderItems: true } },
+        },
+      },
     },
   });
   const skipped: { id: string; slug: string; reason: string }[] = [];
   const deletable: string[] = [];
+  const variantIdsToClear: string[] = [];
   for (const p of targets) {
     const hasOrders = p.variants.some((v) => v._count.orderItems > 0);
     if (hasOrders) {
       skipped.push({ id: p.id, slug: p.slug, reason: "possui pedidos" });
     } else {
       deletable.push(p.id);
+      for (const v of p.variants) variantIdsToClear.push(v.id);
     }
   }
   let affected = 0;
   if (deletable.length) {
-    const res = await prisma.product.deleteMany({ where: { id: { in: deletable } } });
-    affected = res.count;
+    // Clear abandoned cart refs in the same transaction as the product
+    // delete — either both happen or neither, so a mid-flight failure
+    // never leaves carts pointing at a deleted variant.
+    await prisma.$transaction(async (tx) => {
+      if (variantIdsToClear.length) {
+        await tx.cartItem.deleteMany({
+          where: { variantId: { in: variantIdsToClear } },
+        });
+      }
+      const res = await tx.product.deleteMany({
+        where: { id: { in: deletable } },
+      });
+      affected = res.count;
+    });
   }
   revalidatePath("/admin/produtos");
   revalidatePath("/loja");
+  revalidatePath("/carrinho");
   return { ok: true, affected, skipped };
 }
 

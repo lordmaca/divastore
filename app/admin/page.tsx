@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminCentral() {
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -27,6 +29,11 @@ export default async function AdminCentral() {
     recentOrders,
     recentRuns,
     funnel,
+    newCustomersToday,
+    newCustomers7d,
+    newCustomers30d,
+    registrationRuns24h,
+    recentRegistrationFailures,
   ] = await Promise.all([
     prisma.order.aggregate({
       _sum: { totalCents: true },
@@ -48,7 +55,54 @@ export default async function AdminCentral() {
       take: 10,
     }),
     siteFunnelDaily(28),
+    prisma.customer.count({ where: { createdAt: { gte: startOfToday } } }),
+    prisma.customer.count({ where: { createdAt: { gte: since7d } } }),
+    prisma.customer.count({ where: { createdAt: { gte: since30d } } }),
+    prisma.integrationRun.groupBy({
+      by: ["status"],
+      where: {
+        adapter: "auth",
+        operation: "register",
+        createdAt: { gte: since24h },
+      },
+      _count: { status: true },
+    }),
+    prisma.integrationRun.findMany({
+      where: {
+        adapter: "auth",
+        operation: "register",
+        status: { notIn: ["ok", "claimed_guest", "validation_failed"] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    }),
   ]);
+
+  // Classify registration attempts in the last 24h into:
+  //   - success: ok + claimed_guest
+  //   - expected: rate-limits + validation + email-taken + race
+  //   - outage:   anything else (db_error, unknown, …) — the "wake me up" bucket
+  const regSuccessStatuses = new Set(["ok", "claimed_guest"]);
+  const regExpectedStatuses = new Set([
+    "validation_failed",
+    "rate_limited_ip",
+    "rate_limited_email",
+    "email_taken",
+    "race_conflict",
+  ]);
+  const regBreakdown = { success: 0, expected: 0, outage: 0, total: 0 };
+  const regByStatus: Record<string, number> = {};
+  for (const row of registrationRuns24h) {
+    const count = row._count.status;
+    regBreakdown.total += count;
+    regByStatus[row.status] = count;
+    if (regSuccessStatuses.has(row.status)) regBreakdown.success += count;
+    else if (regExpectedStatuses.has(row.status)) regBreakdown.expected += count;
+    else regBreakdown.outage += count;
+  }
+  const regDenominator = regBreakdown.success + regBreakdown.outage;
+  const regSuccessRate =
+    regDenominator > 0 ? Math.round((regBreakdown.success / regDenominator) * 100) : null;
 
   return (
     <div className="space-y-8">
@@ -75,6 +129,121 @@ export default async function AdminCentral() {
         />
         <Stat label="Produtos / clientes" value={`${productsCount} / ${customersCount}`} />
       </div>
+
+      {/* ────────────── Cadastros — saúde do signup ────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-[color:var(--foreground)]/65">
+            Cadastros
+          </h2>
+          <Link
+            href="/admin/clientes"
+            className="text-xs text-[color:var(--pink-600)] hover:underline"
+          >
+            Lista completa →
+          </Link>
+        </div>
+
+        <div
+          className={`glass-card rounded-2xl p-5 ${
+            regBreakdown.outage > 0 ? "ring-2 ring-red-400" : ""
+          }`}
+        >
+          {regBreakdown.outage > 0 ? (
+            <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-3">
+              <p className="text-sm font-semibold text-red-800">
+                ⚠ {regBreakdown.outage} cadastro{regBreakdown.outage > 1 ? "s" : ""} com
+                erro de sistema nas últimas 24h
+              </p>
+              <p className="text-xs text-red-700 mt-1">
+                São falhas fora do esperado (ex.: banco indisponível), não rejeições
+                normais como rate-limit ou validação. Verifique{" "}
+                <Link href="/admin/observability" className="underline font-medium">
+                  Observability
+                </Link>{" "}
+                — o scanner envia e-mail se o padrão persistir.
+              </p>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <MiniStat label="Hoje" value={String(newCustomersToday)} subtle />
+            <MiniStat label="7 dias" value={String(newCustomers7d)} subtle />
+            <MiniStat label="30 dias" value={String(newCustomers30d)} subtle />
+            <MiniStat
+              label="Tentativas 24h"
+              value={String(regBreakdown.total)}
+              subtle
+              detail={
+                regBreakdown.expected > 0
+                  ? `${regBreakdown.expected} esperadas (validação, rate-limit…)`
+                  : undefined
+              }
+            />
+            <MiniStat
+              label="Taxa de sucesso 24h"
+              value={regSuccessRate == null ? "—" : `${regSuccessRate}%`}
+              detail={`${regBreakdown.success} ok · ${regBreakdown.outage} erro`}
+              subtle={regBreakdown.outage === 0}
+              alarm={regBreakdown.outage > 0 || (regSuccessRate != null && regSuccessRate < 50)}
+            />
+          </div>
+
+          {regBreakdown.total > 0 ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {Object.entries(regByStatus)
+                .sort(([, a], [, b]) => b - a)
+                .map(([status, count]) => {
+                  const tone = regSuccessStatuses.has(status)
+                    ? "bg-emerald-100 text-emerald-800"
+                    : regExpectedStatuses.has(status)
+                      ? "bg-zinc-200 text-zinc-700"
+                      : "bg-red-100 text-red-800";
+                  return (
+                    <span
+                      key={status}
+                      className={`text-[11px] font-mono px-2 py-0.5 rounded-full ${tone}`}
+                    >
+                      {status}: {count}
+                    </span>
+                  );
+                })}
+            </div>
+          ) : (
+            <p className="mt-4 text-sm text-[color:var(--foreground)]/65">
+              Nenhuma tentativa de cadastro nas últimas 24h.
+            </p>
+          )}
+
+          {recentRegistrationFailures.length > 0 ? (
+            <div className="mt-4">
+              <p className="text-xs uppercase tracking-wide text-[color:var(--foreground)]/65 mb-2">
+                Falhas recentes (fora de validação)
+              </p>
+              <ul className="text-xs space-y-1">
+                {recentRegistrationFailures.map((r) => (
+                  <li
+                    key={r.id}
+                    className="font-mono text-[11px] text-[color:var(--foreground)]/75"
+                  >
+                    <span className="text-[color:var(--foreground)]/55">
+                      {new Date(r.createdAt).toLocaleString("pt-BR")}
+                    </span>
+                    {" · "}
+                    <span className="font-semibold">{r.status}</span>
+                    {r.error ? (
+                      <span className="text-[color:var(--foreground)]/65">
+                        {" — "}
+                        {r.error.slice(0, 200)}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -181,6 +350,48 @@ function Stat({ label, value, highlight = false }: { label: string; value: strin
     <div className={`glass-card rounded-2xl p-4 ${highlight ? "ring-2 ring-amber-300" : ""}`}>
       <p className="text-xs uppercase tracking-wide text-[color:var(--foreground)]/65">{label}</p>
       <p className="mt-1 text-xl font-semibold text-[color:var(--pink-600)]">{value}</p>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  detail,
+  alarm = false,
+  subtle = false,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  alarm?: boolean;
+  subtle?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-xl p-3 border ${
+        alarm
+          ? "bg-red-50 border-red-200"
+          : subtle
+            ? "bg-white/50 border-white"
+            : "bg-white/70 border-white"
+      }`}
+    >
+      <p className="text-[10px] uppercase tracking-wide text-[color:var(--foreground)]/65">
+        {label}
+      </p>
+      <p
+        className={`text-lg font-semibold ${
+          alarm ? "text-red-700" : "text-[color:var(--pink-600)]"
+        }`}
+      >
+        {value}
+      </p>
+      {detail ? (
+        <p className="text-[10px] text-[color:var(--foreground)]/65 mt-0.5 truncate" title={detail}>
+          {detail}
+        </p>
+      ) : null}
     </div>
   );
 }

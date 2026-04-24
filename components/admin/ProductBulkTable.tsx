@@ -43,17 +43,27 @@ export function ProductBulkTable({ rows }: { rows: Row[] }) {
     if (action === "delete") {
       const msg =
         `Excluir ${selectedIds.length} produto(s)? ` +
-        `Produtos com pedidos passados serão ignorados. Esta ação não pode ser desfeita.`;
+        `Produtos com pedidos passados serão ignorados (histórico preservado). ` +
+        `Itens em carrinhos abandonados são removidos. Esta ação não pode ser desfeita.`;
       if (!confirm(msg)) return;
     }
     start(async () => {
-      const res = await bulkProductAction(selectedIds, action);
-      setSelected(new Set());
-      router.refresh();
-      if (res.skipped.length) {
+      try {
+        const res = await bulkProductAction(selectedIds, action);
+        setSelected(new Set());
+        router.refresh();
+        if (res.skipped.length) {
+          alert(
+            `${res.affected} afetado(s). ${res.skipped.length} ignorado(s):\n` +
+              res.skipped.map((s) => `• ${s.slug} — ${s.reason}`).join("\n"),
+          );
+        }
+      } catch (err) {
+        // Surface the real error instead of silently no-op'ing — the
+        // action throws on DB constraint violations and before this
+        // catch we had no breadcrumb at all.
         alert(
-          `${res.affected} afetado(s). ${res.skipped.length} ignorado(s):\n` +
-            res.skipped.map((s) => `• ${s.slug} — ${s.reason}`).join("\n"),
+          `Falha ao ${action === "delete" ? "excluir" : action === "activate" ? "ativar" : "desativar"}:\n${err instanceof Error ? err.message : String(err)}`,
         );
       }
     });

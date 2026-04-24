@@ -39,8 +39,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <AdminLink href="/admin/clientes">Clientes</AdminLink>
           <AdminLink href="/admin/cupons">Cupons</AdminLink>
           <AdminLink href="/admin/avaliacoes">Avaliações</AdminLink>
+          <AdminLink href="/admin/conversas">Conversas</AdminLink>
           <AdminLink href="/admin/integrations">Integration Center</AdminLink>
           <AdminLink href="/admin/configuracoes">Configurações</AdminLink>
+          <p className="px-3 pt-4 pb-1 text-xs uppercase tracking-wide text-[color:var(--foreground)]/55">
+            Observability
+          </p>
+          <AdminLink href="/admin/observability">Painel</AdminLink>
           <p className="px-3 pt-4 pb-1 text-xs uppercase tracking-wide text-[color:var(--foreground)]/55">
             Relatórios
           </p>

@@ -37,21 +37,35 @@ const AXIS_COPY: Record<NonNullable<Axis>, string> = {
   material: "Acabamento",
 };
 
+// Drop orphan/parent SKUs from the picker. When at least one variant on
+// the product carries a non-empty name (the "real" color/size options),
+// hide variants whose name is null or blank — those are parent placeholders
+// DivaHub's inbound upsert sometimes brings along and they show up as
+// nonsense pills (e.g. "Bijuteriafina" from attributes.material). Single-
+// variant products — where none of the variants have a name — are kept
+// as-is so the picker still has something to offer.
+function visibleVariants(variants: Variant[]): Variant[] {
+  const anyNamed = variants.some((v) => (v.name ?? "").trim().length > 0);
+  if (!anyNamed) return variants;
+  return variants.filter((v) => (v.name ?? "").trim().length > 0);
+}
+
 export function AddToCartForm({ variants }: { variants: Variant[] }) {
   const router = useRouter();
-  const [variantId, setVariantId] = useState(variants[0]?.id ?? "");
+  const pickerVariants = visibleVariants(variants);
+  const [variantId, setVariantId] = useState(pickerVariants[0]?.id ?? "");
   const [qty, setQty] = useState(1);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
 
-  const selected = variants.find((v) => v.id === variantId);
+  const selected = pickerVariants.find((v) => v.id === variantId);
   const oos = !selected || selected.stock < 1;
-  const axis = detectAxis(variants);
+  const axis = detectAxis(pickerVariants);
   const pickerLabel = axis ? AXIS_COPY[axis] : "Variante";
 
   return (
     <div className="space-y-4">
-      {variants.length > 1 ? (
+      {pickerVariants.length > 1 ? (
         <div>
           <label className="block text-sm font-medium mb-2">
             {pickerLabel}
@@ -62,7 +76,7 @@ export function AddToCartForm({ variants }: { variants: Variant[] }) {
             ) : null}
           </label>
           <div className="flex flex-wrap gap-2">
-            {variants.map((v) => {
+            {pickerVariants.map((v) => {
               const active = v.id === variantId;
               return (
                 <button

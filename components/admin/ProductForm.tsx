@@ -79,6 +79,15 @@ export function ProductForm({ mode, productId, initial, categories, divahubManag
   function removeImage(i: number) {
     setImages((p) => p.filter((_, idx) => idx !== i));
   }
+  function moveImage(from: number, to: number) {
+    setImages((p) => {
+      if (to < 0 || to >= p.length || from === to) return p;
+      const next = p.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
 
   function submit() {
     setError(null);
@@ -352,28 +361,92 @@ export function ProductForm({ mode, productId, initial, categories, divahubManag
         {images.length === 0 ? (
           <p className="text-sm text-[color:var(--foreground)]/65">Nenhuma imagem ainda.</p>
         ) : null}
+        {images.length > 1 ? (
+          <p className="text-xs text-[color:var(--foreground)]/60">
+            A primeira imagem é usada como capa (em /loja, carrinho, checkout e feeds). Use as
+            setas para reordenar.
+          </p>
+        ) : null}
         {images.map((img, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 items-end">
-            <Field label="URL" className="col-span-7">
-              <input
-                value={img.url}
-                onChange={(e) => setImage(i, { url: e.target.value })}
-                placeholder="https://images.unsplash.com/..."
-                className="w-full rounded-xl bg-white/80 border border-white px-3 py-2 text-xs"
-                required
-              />
-            </Field>
-            <Field label="Texto alternativo" className="col-span-4">
-              <input
-                value={img.alt ?? ""}
-                onChange={(e) => setImage(i, { alt: e.target.value })}
-                className="w-full rounded-xl bg-white/80 border border-white px-3 py-2"
-              />
-            </Field>
+          <div
+            key={i}
+            className="grid grid-cols-[auto_56px_1fr_auto] gap-2 items-center rounded-xl bg-white/40 border border-white/60 p-2"
+          >
+            {/* Reorder controls */}
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => moveImage(i, i - 1)}
+                disabled={i === 0}
+                aria-label="Mover para cima"
+                className="h-6 w-6 rounded-full bg-white/80 border border-white hover:bg-white disabled:opacity-30 grid place-items-center text-xs"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => moveImage(i, i + 1)}
+                disabled={i === images.length - 1}
+                aria-label="Mover para baixo"
+                className="h-6 w-6 rounded-full bg-white/80 border border-white hover:bg-white disabled:opacity-30 grid place-items-center text-xs"
+              >
+                ↓
+              </button>
+            </div>
+
+            {/* Thumbnail preview */}
+            <div className="h-14 w-14 rounded-lg overflow-hidden bg-[color:var(--pink-50)] border border-white relative">
+              {img.url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={img.url}
+                  alt={img.alt || `Imagem ${i + 1}`}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="h-full w-full grid place-items-center text-[color:var(--pink-200)] text-lg">
+                  ✨
+                </div>
+              )}
+              {i === 0 ? (
+                <span className="absolute -top-1 -left-1 text-[9px] font-semibold bg-[color:var(--pink-500)] text-white rounded-full px-1.5 py-0.5 shadow">
+                  Principal
+                </span>
+              ) : null}
+            </div>
+
+            {/* URL + alt */}
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 min-w-0">
+              <div className="min-w-0 space-y-1">
+                <label className="text-[11px] font-medium text-[color:var(--foreground)]/70">
+                  URL
+                </label>
+                <input
+                  value={img.url}
+                  onChange={(e) => setImage(i, { url: e.target.value })}
+                  placeholder="https://images.unsplash.com/..."
+                  className="w-full rounded-xl bg-white/80 border border-white px-3 py-1.5 text-xs font-mono truncate"
+                  required
+                />
+              </div>
+              <div className="min-w-0 sm:w-48 space-y-1">
+                <label className="text-[11px] font-medium text-[color:var(--foreground)]/70">
+                  Texto alternativo
+                </label>
+                <input
+                  value={img.alt ?? ""}
+                  onChange={(e) => setImage(i, { alt: e.target.value })}
+                  className="w-full rounded-xl bg-white/80 border border-white px-3 py-1.5 text-xs"
+                />
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={() => removeImage(i)}
-              className="col-span-1 rounded-full bg-red-100 text-red-700 hover:bg-red-200 text-xs font-medium px-2 py-2"
+              aria-label="Remover imagem"
+              className="h-8 w-8 rounded-full bg-red-100 text-red-700 hover:bg-red-200 text-sm font-medium grid place-items-center"
             >
               ×
             </button>

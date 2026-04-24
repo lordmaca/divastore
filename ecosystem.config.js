@@ -132,5 +132,79 @@ module.exports = {
       error_file: "/home/ubuntu/brilhodedivasite/logs/abandoned-cart-err.log",
       time: true,
     },
+    // ── Encrypted offsite backup (pg_dump + GPG + OCI bucket) ──────────
+    // Three tiers with independent retention, pruned nightly. Archives
+    // are encrypted for BACKUP_GPG_RECIPIENT before leaving the server;
+    // only someone with the matching private key can decrypt.
+    // See docs/backup-and-restore.md for the runbook.
+    {
+      name: "brilhodediva-backup-daily",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/backup.ts --tier=daily",
+      autorestart: false,
+      cron_restart: "0 3 * * *", // 03:00 UTC every day
+      env: { NODE_ENV: "production", PATH: "/usr/local/bin:/usr/bin:/bin" },
+      node_args: "--env-file=/home/ubuntu/brilhodedivasite/.env.local",
+      out_file: "/home/ubuntu/brilhodedivasite/logs/backup-daily-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/backup-daily-err.log",
+      time: true,
+    },
+    {
+      name: "brilhodediva-backup-weekly",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/backup.ts --tier=weekly",
+      autorestart: false,
+      cron_restart: "5 3 * * 0", // 03:05 UTC Sundays
+      env: { NODE_ENV: "production", PATH: "/usr/local/bin:/usr/bin:/bin" },
+      node_args: "--env-file=/home/ubuntu/brilhodedivasite/.env.local",
+      out_file: "/home/ubuntu/brilhodedivasite/logs/backup-weekly-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/backup-weekly-err.log",
+      time: true,
+    },
+    {
+      name: "brilhodediva-backup-monthly",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/backup.ts --tier=monthly",
+      autorestart: false,
+      cron_restart: "10 3 1 * *", // 03:10 UTC day 1 of each month
+      env: { NODE_ENV: "production", PATH: "/usr/local/bin:/usr/bin:/bin" },
+      node_args: "--env-file=/home/ubuntu/brilhodedivasite/.env.local",
+      out_file: "/home/ubuntu/brilhodedivasite/logs/backup-monthly-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/backup-monthly-err.log",
+      time: true,
+    },
+    {
+      // Observability alert scanner — runs every 15 min. Scans IntegrationRun,
+      // backup audit, CronHeartbeat, DB health; upserts Alert rows and emails
+      // the recipient list from `alerts.config`. See docs/backup-and-restore.md
+      // and /admin/observability.
+      name: "brilhodediva-alert-scanner",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/alert-scanner.ts",
+      autorestart: false,
+      cron_restart: "*/15 * * * *",
+      env: { NODE_ENV: "production" },
+      node_args: "--env-file=/home/ubuntu/brilhodedivasite/.env.local",
+      out_file: "/home/ubuntu/brilhodedivasite/logs/alert-scanner-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/alert-scanner-err.log",
+      time: true,
+    },
+    {
+      name: "brilhodediva-backup-prune",
+      cwd: "/home/ubuntu/brilhodedivasite",
+      script: "node_modules/.bin/tsx",
+      args: "scripts/prune-backups.ts --delete",
+      autorestart: false,
+      cron_restart: "0 4 * * *", // 04:00 UTC daily — after all backup tiers have run
+      env: { NODE_ENV: "production" },
+      node_args: "--env-file=/home/ubuntu/brilhodedivasite/.env.local",
+      out_file: "/home/ubuntu/brilhodedivasite/logs/backup-prune-out.log",
+      error_file: "/home/ubuntu/brilhodedivasite/logs/backup-prune-err.log",
+      time: true,
+    },
   ],
 };

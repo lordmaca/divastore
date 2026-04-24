@@ -10,7 +10,7 @@ import { z } from "zod";
 export const slugSchema = z
   .string()
   .min(2)
-  .max(80)
+  .max(200)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "slug must be lowercase-kebab-case");
 
 export const skuSchema = z.string().min(1).max(64);
