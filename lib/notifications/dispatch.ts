@@ -6,6 +6,7 @@ import { sendWhatsApp } from "./channels/whatsapp";
 import { render, type TemplateData, type TemplateName } from "./templates";
 import { NotConfiguredError, TransportError } from "./errors";
 import { absoluteUrl } from "./templates/shared";
+import { signUnsubscribeToken } from "./unsubscribe-token";
 
 type EnqueueInput<K extends TemplateName> = {
   channel: NotificationChannel;
@@ -109,7 +110,7 @@ export async function sendPending(id: string): Promise<void> {
         return;
       }
       const unsubscribeUrl = row.customerId
-        ? absoluteUrl(`/unsubscribe?cid=${encodeURIComponent(row.customerId)}`)
+        ? absoluteUrl(`/unsubscribe?u=${encodeURIComponent(signUnsubscribeToken(row.customerId))}`)
         : undefined;
       await sendEmail({
         to: row.recipient,

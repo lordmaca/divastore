@@ -1,10 +1,12 @@
 import { customerRegistrationsDaily, repeatPurchaseRate } from "@/lib/metrics";
 import { Sparkline } from "@/components/admin/Sparkline";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClientesReportPage() {
+  await requireAdmin();
   const [series, repeat, totalCustomers, last30dCount] = await Promise.all([
     customerRegistrationsDaily(28),
     repeatPurchaseRate(90),

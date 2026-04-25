@@ -6,10 +6,12 @@ import { OrderStatus } from "@/lib/generated/prisma/enums";
 import { getSetting } from "@/lib/settings";
 import { siteFunnelDaily } from "@/lib/metrics";
 import { FunnelChart } from "@/components/admin/FunnelChart";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminCentral() {
+  await requireAdmin();
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

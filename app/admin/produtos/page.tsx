@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
 import { ProductSource } from "@/lib/generated/prisma/enums";
 import { ProductBulkTable } from "@/components/admin/ProductBulkTable";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function ProdutosPage({
 }: {
   searchParams: Promise<{ q?: string; source?: string; status?: string }>;
 }) {
+  await requireAdmin();
   const { q, source, status } = await searchParams;
 
   const products = await prisma.product.findMany({

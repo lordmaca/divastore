@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { ChatConversationStatus } from "@/lib/generated/prisma/enums";
 import { ConfirmDeleteButton } from "@/components/admin/ConfirmDeleteButton";
 import { deleteConversation } from "./actions";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ export default async function ConversationsAdminPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
+  await requireAdmin();
   const { status } = await searchParams;
   const statusFilter =
     status === "OPEN" || status === "CLOSED" || status === "HANDOFF"

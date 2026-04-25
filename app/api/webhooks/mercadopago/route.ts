@@ -12,6 +12,7 @@ import {
 } from "@/lib/generated/prisma/enums";
 import { sendSafe } from "@/lib/notifications/dispatch";
 import { absoluteUrl } from "@/lib/notifications/templates/shared";
+import { notifyAdminNewOrder } from "@/lib/notifications/admin-order";
 import { recordOrderEvent } from "@/lib/order-events";
 import { issueInvoice } from "@/lib/invoices";
 import { getSetting } from "@/lib/settings";
@@ -291,6 +292,13 @@ export async function POST(req: NextRequest) {
         customerId: order.customerId,
         orderId,
       });
+    }
+
+    // Notify the admin team (separate from the customer email). Idempotent
+    // by orderId, so MP webhook retries don't duplicate. Gated on
+    // `statusChanged` so a repeat webhook after PAID doesn't re-email either.
+    if (statusChanged) {
+      await notifyAdminNewOrder(orderId);
     }
   } else if (mappedStatus === PaymentStatus.REFUNDED) {
     await prisma.order.update({ where: { id: orderId }, data: { status: OrderStatus.REFUNDED } });

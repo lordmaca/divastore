@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { StarRating } from "@/components/StarRating";
 import { ReviewStatusButtons } from "@/components/admin/ReviewStatusButtons";
 import { ReviewStatus } from "@/lib/generated/prisma/enums";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function ReviewsAdminPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
+  await requireAdmin();
   const { status } = await searchParams;
   const where =
     status === "HIDDEN" || status === "PUBLISHED" ? { status: status as ReviewStatus } : {};

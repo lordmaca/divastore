@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
 import { FULFILLED_ORDER_STATES } from "@/lib/orders";
 import { AnonymizeButton } from "@/components/admin/AnonymizeButton";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function ClienteDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireAdmin();
   const { id } = await params;
   const customer = await prisma.customer.findUnique({
     where: { id },

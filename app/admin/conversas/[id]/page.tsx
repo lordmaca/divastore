@@ -7,6 +7,7 @@ import {
 } from "@/lib/generated/prisma/enums";
 import { ConfirmDeleteButton } from "@/components/admin/ConfirmDeleteButton";
 import { deleteConversation } from "../actions";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export default async function ConversationDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requireAdmin();
   const { id } = await params;
 
   const c = await prisma.chatConversation.findUnique({

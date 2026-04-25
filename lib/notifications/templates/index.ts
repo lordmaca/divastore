@@ -1,5 +1,13 @@
 import { RenderError } from "../errors";
-import { absoluteUrl, brl, formatDatePtBr, greeting, renderShell } from "./shared";
+import {
+  absoluteUrl,
+  brl,
+  escapeHtml,
+  formatDatePtBr,
+  greeting,
+  renderShell,
+  safeEmailUrl,
+} from "./shared";
 
 // Every template produces { subject, html, text } plus a flag telling the
 // dispatcher whether it is transactional (always sent) or marketing
@@ -106,8 +114,14 @@ type Data = {
 export type TemplateName = keyof Data;
 
 function lineList(items: OrderLine[]): string {
+  // it.name is product.nameSnapshot or similar — admin-controlled, but an
+  // email rendered into an admin inbox should still escape so an
+  // attacker-controlled DivaHub product name can't drop markup.
   return items
-    .map((it) => `<li style="margin:4px 0;">${it.qty}× ${it.name} — <strong>${brl(it.totalCents)}</strong></li>`)
+    .map(
+      (it) =>
+        `<li style="margin:4px 0;">${it.qty}× ${escapeHtml(it.name)} — <strong>${brl(it.totalCents)}</strong></li>`,
+    )
     .join("");
 }
 
@@ -153,7 +167,7 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
       <p>Recebemos o seu pedido <strong>#${d.orderNumber}</strong>. Para confirmar, é só pagar o Pix abaixo:</p>
       ${qrImg}
       <p><strong>Código Pix copia-e-cola:</strong></p>
-      <pre style="font-family:'Courier New',Courier,monospace;background:#fdf4ff;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;font-size:12px;">${d.pixQrCode}</pre>
+      <pre style="font-family:'Courier New',Courier,monospace;background:#fdf4ff;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;font-size:12px;">${escapeHtml(d.pixQrCode)}</pre>
       ${expiresLine}
       <p>Total do pedido: <strong>${brl(d.totalCents)}</strong></p>
     `;
@@ -218,14 +232,21 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
 
   order_shipped: (d) => {
     const subject = `Seu pedido #${d.orderNumber} está a caminho 🚚`;
-    const carrierLine = d.carrier ? `<p><strong>Transportadora:</strong> ${d.carrier}</p>` : "";
-    const etaLine = d.etaDays ? `<p><strong>Previsão de entrega:</strong> ${d.etaDays} dias úteis</p>` : "";
-    const trackCta = d.trackingUrl ?? absoluteUrl("/minha-conta/pedidos");
+    const carrierLine = d.carrier
+      ? `<p><strong>Transportadora:</strong> ${escapeHtml(d.carrier)}</p>`
+      : "";
+    const etaLine = d.etaDays
+      ? `<p><strong>Previsão de entrega:</strong> ${d.etaDays} dias úteis</p>`
+      : "";
+    const trackCta = safeEmailUrl(
+      d.trackingUrl ?? absoluteUrl("/minha-conta/pedidos"),
+      absoluteUrl("/minha-conta/pedidos"),
+    );
     const bodyHtml = `
       <p>${greeting(d.customerName)},</p>
       <p>Boa notícia! Seu pedido <strong>#${d.orderNumber}</strong> foi postado e já está a caminho.</p>
       ${carrierLine}
-      <p><strong>Código de rastreio:</strong> <code style="background:#fdf4ff;padding:2px 6px;border-radius:4px;">${d.trackingCode}</code></p>
+      <p><strong>Código de rastreio:</strong> <code style="background:#fdf4ff;padding:2px 6px;border-radius:4px;">${escapeHtml(d.trackingCode)}</code></p>
       ${etaLine}
     `;
     const text = `${greeting(d.customerName)},\n\nSeu pedido #${d.orderNumber} foi postado e já está a caminho.\n${d.carrier ? `Transportadora: ${d.carrier}\n` : ""}Código de rastreio: ${d.trackingCode}\n${d.etaDays ? `Previsão: ${d.etaDays} dias úteis\n` : ""}\nRastrear: ${trackCta}\n\nBrilho de Diva`;
@@ -267,11 +288,11 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
 
   invoice_issued: (d) => {
     const nfLine = d.invoiceNumber
-      ? `NF-e <strong>${d.invoiceNumber}${d.serie ? "/" + d.serie : ""}</strong>`
+      ? `NF-e <strong>${escapeHtml(d.invoiceNumber)}${d.serie ? "/" + escapeHtml(d.serie) : ""}</strong>`
       : "Sua nota fiscal";
     const subject = `Sua nota fiscal do pedido #${d.orderNumber} está pronta 🧾`;
     const xmlLine = d.xmlUrl
-      ? `<p style="font-size:13px;"><a href="${d.xmlUrl}" style="color:#be185d;">Baixar XML</a></p>`
+      ? `<p style="font-size:13px;"><a href="${escapeHtml(safeEmailUrl(d.xmlUrl))}" style="color:#be185d;">Baixar XML</a></p>`
       : "";
     const bodyHtml = `
       <p>${greeting(d.customerName)},</p>
@@ -308,7 +329,7 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
             : ""
         }
       </p>
-      <p style="color:#6b7280;font-size:13px;">Motivo: ${d.reason}</p>
+      <p style="color:#6b7280;font-size:13px;">Motivo: ${escapeHtml(d.reason)}</p>
       <p>O valor deve aparecer em até <strong>7 dias úteis</strong> no mesmo meio de pagamento usado na compra (Pix, cartão ou boleto).</p>
     `;
     const text = `${greeting(d.customerName)},\n\nConfirmamos um reembolso${d.fullyRefunded ? " total" : " parcial"} no pedido #${d.orderNumber}.\n\nValor deste reembolso: ${brl(d.amountCents)}${!d.fullyRefunded ? `\nTotal reembolsado: ${brl(d.totalRefundedCents)}` : ""}\nMotivo: ${d.reason}\n\nO valor aparece em até 7 dias úteis no mesmo meio de pagamento.\n\nAcompanhe: ${d.orderUrl}\n\nBrilho de Diva`;
@@ -329,12 +350,12 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
   out_for_delivery: (d) => {
     const subject = `Seu pedido #${d.orderNumber} saiu para entrega 📦`;
     const trackLine = d.trackingUrl
-      ? `<p><a href="${d.trackingUrl}" style="color:#be185d;">Acompanhar pela transportadora</a></p>`
+      ? `<p><a href="${escapeHtml(safeEmailUrl(d.trackingUrl))}" style="color:#be185d;">Acompanhar pela transportadora</a></p>`
       : "";
     const bodyHtml = `
       <p>${greeting(d.customerName)},</p>
       <p>Boa notícia! Seu pedido <strong>#${d.orderNumber}</strong> saiu para entrega e deve chegar hoje.</p>
-      <p><strong>Código de rastreio:</strong> <code style="background:#fdf4ff;padding:2px 6px;border-radius:4px;">${d.trackingCode}</code></p>
+      <p><strong>Código de rastreio:</strong> <code style="background:#fdf4ff;padding:2px 6px;border-radius:4px;">${escapeHtml(d.trackingCode)}</code></p>
       ${trackLine}
       <p style="color:#6b7280;font-size:13px;">Se possível, deixe alguém em casa para receber. Se der problema na entrega, avisamos por aqui.</p>
     `;
@@ -358,7 +379,7 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
     const bodyHtml = `
       <p>${greeting(d.customerName)},</p>
       <p>A transportadora registrou uma ocorrência na entrega do seu pedido <strong>#${d.orderNumber}</strong>:</p>
-      <p style="background:#fef3c7;border-radius:8px;padding:12px;color:#78350f;"><strong>${d.reason}</strong></p>
+      <p style="background:#fef3c7;border-radius:8px;padding:12px;color:#78350f;"><strong>${escapeHtml(d.reason)}</strong></p>
       <p>Não se preocupe — estamos acompanhando e vamos fazer de tudo para resolver rapidinho. Se precisar de algo, é só responder este e-mail.</p>
     `;
     const text = `${greeting(d.customerName)},\n\nA transportadora registrou uma ocorrência na entrega do pedido #${d.orderNumber}:\n${d.reason}\n\nEstamos acompanhando. Se precisar, é só responder este e-mail.\n\nAcompanhe: ${d.orderUrl}\n\nBrilho de Diva`;
@@ -437,7 +458,7 @@ const renderers: { [K in TemplateName]: (data: Data[K]) => RenderedMessage } = {
         bodyHtml,
         ctaLabel: "Retomar compra",
         ctaUrl: d.resumeUrl,
-        footerNote: `Se não quer mais receber novidades, <a href="${d.unsubscribeUrl}" style="color:#be185d;">cancele a inscrição aqui</a>.`,
+        footerNote: `Se não quer mais receber novidades, <a href="${escapeHtml(safeEmailUrl(d.unsubscribeUrl))}" style="color:#be185d;">cancele a inscrição aqui</a>.`,
       }),
       text,
       marketing: true,

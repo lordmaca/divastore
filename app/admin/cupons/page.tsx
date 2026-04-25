@@ -3,10 +3,12 @@ import { CouponForm } from "@/components/admin/CouponForm";
 import { ToggleCouponButton } from "@/components/admin/ToggleCouponButton";
 import { formatBRL } from "@/lib/money";
 import { CouponType } from "@/lib/generated/prisma/enums";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function CouponsPage() {
+  await requireAdmin();
   const [coupons, usage] = await Promise.all([
     prisma.coupon.findMany({ orderBy: { createdAt: "desc" } }),
     // Orders that actually used each coupon (completed or any status — admin

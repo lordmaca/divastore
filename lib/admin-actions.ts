@@ -14,6 +14,7 @@ import {
 } from "@/lib/generated/prisma/enums";
 import { sendSafe } from "@/lib/notifications/dispatch";
 import { absoluteUrl } from "@/lib/notifications/templates/shared";
+import { notifyAdminNewOrder } from "@/lib/notifications/admin-order";
 import { recordOrderEvent } from "@/lib/order-events";
 import { buildFullCatalogSnapshot } from "@/lib/integration/tiny/stock-fetch";
 import {
@@ -172,6 +173,9 @@ export async function markOrderPaid(orderId: string) {
       orderId: order.id,
     });
   }
+
+  // Also notify the admin team — same idempotency as the webhook path.
+  await notifyAdminNewOrder(order.id);
 
   revalidatePath("/admin/pedidos");
   revalidatePath(`/admin/pedidos/${order.id}`);

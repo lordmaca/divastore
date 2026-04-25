@@ -2,6 +2,7 @@ import Link from "next/link";
 import { OrderRow } from "@/components/admin/OrderRow";
 import { searchOrders, parseSearchParams } from "@/lib/orders/search";
 import { OrderStatus, PaymentMethod } from "@/lib/generated/prisma/enums";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export default async function AdminOrdersPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
+  await requireAdmin();
   const sp = await searchParams;
   const opts = parseSearchParams(sp);
   const { rows, total, page, pageSize, totalPages } = await searchOrders(opts);

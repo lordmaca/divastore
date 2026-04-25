@@ -7,6 +7,7 @@ import { OrderStatus, PaymentStatus } from "@/lib/generated/prisma/enums";
 import { PaymentCard } from "@/components/account/PaymentCard";
 import { OrderReviewSection, type OrderReviewItem } from "@/components/account/OrderReviewSection";
 import { payOrderWithMp } from "./actions";
+import { safeExternalUrl } from "@/lib/url";
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: "Aguardando pagamento",
@@ -59,7 +60,12 @@ export default async function OrderDetailPage({
     },
   });
   if (!order) notFound();
-  if (order.customerId && order.customerId !== session.user.id) notFound();
+  // Guest orders (order.customerId === null) must never be viewable through
+  // the logged-in account page — they were placed without login. If the
+  // customer later claimed their account, the Order.customerId is backfilled.
+  // Until then, hide them. The same notFound() also covers an order that
+  // belongs to a DIFFERENT customer (IDOR).
+  if (!order.customerId || order.customerId !== session.user.id) notFound();
 
   // Build the review list only when the order is DELIVERED. Dedupe by
   // productId — a product bought in two variants still gets one entry.
@@ -218,7 +224,7 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap gap-2">
             {issuedInvoice.danfeUrl ? (
               <a
-                href={issuedInvoice.danfeUrl}
+                href={safeExternalUrl(issuedInvoice.danfeUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-full bg-[color:var(--pink-500)] hover:bg-[color:var(--pink-600)] text-white font-medium text-sm px-4 py-2"
@@ -228,7 +234,7 @@ export default async function OrderDetailPage({
             ) : null}
             {issuedInvoice.xmlUrl ? (
               <a
-                href={issuedInvoice.xmlUrl}
+                href={safeExternalUrl(issuedInvoice.xmlUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-full bg-white/70 hover:bg-white border border-pink-200 text-[color:var(--pink-600)] font-medium text-sm px-4 py-2"
@@ -255,7 +261,7 @@ export default async function OrderDetailPage({
           ) : null}
           {order.trackingUrl ? (
             <a
-              href={order.trackingUrl}
+              href={safeExternalUrl(order.trackingUrl)}
               target="_blank"
               rel="noreferrer"
               className="inline-block text-sm text-[color:var(--pink-600)] hover:underline"

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
 import { FULFILLED_ORDER_STATES } from "@/lib/orders";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function ClientesPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
+  await requireAdmin();
   const { q, page } = await searchParams;
   const pageNum = Math.max(1, Number(page ?? 1));
   const where = q

@@ -6,6 +6,7 @@ import path from "path";
 import { adapters } from "@/lib/integration/registry";
 import { AlertSeverity } from "@/lib/generated/prisma/enums";
 import { AlertsConfigForm } from "@/components/admin/observability/AlertsConfigForm";
+import { AdminOrderNotificationsForm } from "@/components/admin/observability/AdminOrderNotificationsForm";
 import { RunScanButton } from "@/components/admin/observability/RunScanButton";
 import { ConfirmDeleteButton } from "@/components/admin/ConfirmDeleteButton";
 import { resolveAlert, resolveAllAlerts } from "./actions";
@@ -92,9 +93,10 @@ async function adapterHealth() {
 export default async function ObservabilityPage() {
   await requireAdmin();
 
-  const [cfg, alertsOpen, alertsRecent, heartbeats, backupRows, hubHealth] =
+  const [cfg, adminOrdersCfg, alertsOpen, alertsRecent, heartbeats, backupRows, hubHealth, recentAdminNotifications] =
     await Promise.all([
       getSetting("alerts.config"),
+      getSetting("notifications.adminOrders"),
       prisma.alert.findMany({
         where: { resolvedAt: null },
         orderBy: [{ severity: "desc" }, { lastSeenAt: "desc" }],
@@ -107,6 +109,11 @@ export default async function ObservabilityPage() {
       prisma.cronHeartbeat.findMany({ orderBy: { name: "asc" } }),
       readBackupRows(),
       adapterHealth(),
+      prisma.integrationRun.findMany({
+        where: { adapter: "admin_notifications", operation: "new_order" },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
     ]);
 
   // Last 24h integration stats per adapter.
@@ -414,6 +421,60 @@ export default async function ObservabilityPage() {
       <section className="glass-card rounded-2xl p-5">
         <h2 className="font-semibold mb-3">Configuração dos alertas</h2>
         <AlertsConfigForm initial={cfg} />
+      </section>
+
+      {/* Admin order notifications */}
+      <section className="glass-card rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">Notificações de pedido para a equipe</h2>
+          <span className="text-[11px] text-[color:var(--foreground)]/60">
+            Diferente dos e-mails transacionais do cliente
+          </span>
+        </div>
+        <AdminOrderNotificationsForm initial={adminOrdersCfg} />
+
+        {recentAdminNotifications.length > 0 ? (
+          <div className="mt-5 pt-4 border-t border-white/60">
+            <p className="text-xs uppercase tracking-wide text-[color:var(--foreground)]/65 mb-2">
+              Últimos envios
+            </p>
+            <ul className="space-y-1 text-xs">
+              {recentAdminNotifications.map((r) => {
+                const p = (r.payload ?? {}) as {
+                  orderNumber?: number;
+                  totalCents?: number;
+                  sent?: number;
+                  attempted?: number;
+                };
+                return (
+                  <li
+                    key={r.id}
+                    className="flex items-center gap-2 text-[color:var(--foreground)]/75"
+                  >
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        r.status === "ok"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                    <span className="font-mono">#{p.orderNumber ?? "?"}</span>
+                    <span>·</span>
+                    <span>
+                      {p.sent ?? 0}/{p.attempted ?? 0} destinatários
+                    </span>
+                    <span className="opacity-60">· {fmtPt(r.createdAt)}</span>
+                    {r.error ? (
+                      <span className="text-red-700 truncate">· {r.error}</span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       {/* Recently resolved (history) */}

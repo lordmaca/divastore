@@ -10,6 +10,7 @@
 
 import { getSecret } from "@/lib/settings/config";
 import { getSetting } from "@/lib/settings";
+import { assertAllowedUrl, TINY_ALLOW } from "@/lib/integration/ssrf";
 
 export type TinyConfig = {
   token: string;
@@ -25,6 +26,13 @@ export async function loadTinyConfig(): Promise<TinyConfig> {
     token: token ?? "",
     baseUrl: baseSetting.url || "https://api.tiny.com.br/api2",
   };
+}
+
+// SSRF guard for every Tiny endpoint. Called at the top of each fetch
+// site — rejects baseUrls that aren't on the Tiny host allowlist (e.g. a
+// compromised admin pointing the integration at 127.0.0.1 or metadata).
+function assertTinyTarget(url: string): void {
+  assertAllowedUrl(url, TINY_ALLOW);
 }
 
 export type TinyEnvelope<T> = {
@@ -50,12 +58,14 @@ async function call<T>(
 ): Promise<T> {
   const cfg = await loadTinyConfig();
   if (!cfg.token) throw new TinyError("Tiny API token not configured");
+  const url = `${cfg.baseUrl}/${endpoint}`;
+  assertTinyTarget(url);
   const body = new URLSearchParams({
     token: cfg.token,
     formato: "JSON",
     ...payload,
   });
-  const res = await fetch(`${cfg.baseUrl}/${endpoint}`, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -109,12 +119,14 @@ export type TinyProdutoSearchResponse = {
 export async function tinyBuscarProdutoPorSku(sku: string): Promise<TinyProdutoSearchResponse | null> {
   const cfg = await loadTinyConfig();
   if (!cfg.token) throw new TinyError("Tiny API token not configured");
+  const url = `${cfg.baseUrl}/produtos.pesquisa.php`;
+  assertTinyTarget(url);
   const body = new URLSearchParams({
     token: cfg.token,
     formato: "JSON",
     pesquisa: sku,
   });
-  const res = await fetch(`${cfg.baseUrl}/produtos.pesquisa.php`, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -219,6 +231,8 @@ export async function tinyListProductsPage(
 ): Promise<TinyProdutoListPage> {
   const cfg = await loadTinyConfig();
   if (!cfg.token) throw new TinyError("Tiny API token not configured");
+  const url = `${cfg.baseUrl}/produtos.pesquisa.php`;
+  assertTinyTarget(url);
   const body = new URLSearchParams({
     token: cfg.token,
     formato: "JSON",
@@ -227,7 +241,7 @@ export async function tinyListProductsPage(
     // Tiny-side drafts or archived items for stock reconciliation.
     situacao: "A",
   });
-  const res = await fetch(`${cfg.baseUrl}/produtos.pesquisa.php`, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -360,8 +374,10 @@ export async function tinyGetStockByProductId(id: string): Promise<number | null
 async function fetchEstoqueById(id: string): Promise<TinyEstoqueProduto | null> {
   const cfg = await loadTinyConfig();
   if (!cfg.token) throw new TinyError("Tiny API token not configured");
+  const url = `${cfg.baseUrl}/produto.obter.estoque.php`;
+  assertTinyTarget(url);
   const body = new URLSearchParams({ token: cfg.token, formato: "JSON", id });
-  const res = await fetch(`${cfg.baseUrl}/produto.obter.estoque.php`, {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),

@@ -81,7 +81,7 @@ export default async function CadastroPage({
       redirect(`/cadastro?error=rate${next ? `&next=${encodeURIComponent(next)}` : ""}`);
     }
 
-    const passwordHash = await hash(password, 10);
+    const passwordHash = await hash(password, 12);
     const now = new Date();
     let createdId: string | null = null;
     let finalStatus: "ok" | "claimed_guest" = "ok";

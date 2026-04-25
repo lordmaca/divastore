@@ -62,7 +62,7 @@ export default async function RedefinirSenhaPage({
     const target = await consumeResetToken(parsed.data.token);
     if (!target) redirect(`/redefinir-senha?error=expired`);
 
-    const passwordHash = await hash(parsed.data.password, 10);
+    const passwordHash = await hash(parsed.data.password, 12);
     const customer = await prisma.customer.update({
       where: { id: target.customerId },
       data: {

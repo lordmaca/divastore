@@ -13,6 +13,19 @@ export const dynamic = "force-dynamic";
 // FunnelEvent. We rate-limit per IP to keep the pipe clean against floods.
 const RATE = { capacity: 60, refillPerSecond: 5 };
 
+// Public-beacon funnel allowlist. `ORDER_CREATED` / `ORDER_PAID` imply a
+// DB-backed commitment and are ONLY emitted server-side (checkout action
+// + MP webhook). Allowing them on this public endpoint let any client POST
+// fake "paid order" rows and inflate the admin reporting dashboards.
+const PUBLIC_FUNNEL_EVENTS = [
+  FunnelEventType.VIEW_PDP,
+  FunnelEventType.ADD_TO_CART,
+  FunnelEventType.BEGIN_CHECKOUT,
+] as const;
+const PublicFunnelEnum = z.enum(
+  PUBLIC_FUNNEL_EVENTS as unknown as [string, ...string[]],
+);
+
 const beaconSchema = z.object({
   path: z.string().min(1).max(500),
   productId: z.string().min(1).max(64).nullish(),
@@ -21,7 +34,8 @@ const beaconSchema = z.object({
   utmSource: z.string().max(120).nullish(),
   utmMedium: z.string().max(120).nullish(),
   utmCampaign: z.string().max(120).nullish(),
-  funnel: z.nativeEnum(FunnelEventType).nullish(),
+  // Restricted to front-of-funnel only; ORDER_* events rejected.
+  funnel: PublicFunnelEnum.nullish(),
 });
 
 export async function POST(req: NextRequest) {
@@ -87,9 +101,14 @@ export async function POST(req: NextRequest) {
   });
 
   if (parsed.funnel) {
+    // Safe cast — PublicFunnelEnum is a subset of FunnelEventType by
+    // construction (its values come directly from the FunnelEventType
+    // enum). The Zod schema produces a string because of how z.enum
+    // narrows, but the runtime value is guaranteed to be one of the
+    // allowlist entries.
     await prisma.funnelEvent.create({
       data: {
-        type: parsed.funnel,
+        type: parsed.funnel as FunnelEventType,
         sessionId,
         customerId,
         productId,

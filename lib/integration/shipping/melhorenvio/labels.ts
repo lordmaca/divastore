@@ -12,13 +12,16 @@
 // ME sometimes takes 2-5s to generate labels, so callers poll / retry.
 
 import { MelhorEnvioError, loadMelhorEnvioConfig } from "./client";
+import { assertAllowedUrl, MELHORENVIO_ALLOW } from "@/lib/integration/ssrf";
 
 const UA = "BrilhoDeDivaStorefront/1.0 (contato@brilhodediva.com.br)";
 
 async function call<T>(path: string, init: RequestInit): Promise<T> {
   const cfg = await loadMelhorEnvioConfig();
   if (!cfg.accessToken) throw new MelhorEnvioError("Melhor Envio not configured");
-  const res = await fetch(`${cfg.baseUrl}${path}`, {
+  const url = `${cfg.baseUrl}${path}`;
+  assertAllowedUrl(url, MELHORENVIO_ALLOW);
+  const res = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",

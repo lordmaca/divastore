@@ -1,9 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { rateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Per-IP rate limit. The endpoint is public (catalog is already public)
+// but a loop that hydrates the same 12 slugs in a tight loop would touch
+// the DB harder than any real chat UI. 60 req/min / IP is comfortably
+// above legitimate use.
+const RATE = { capacity: 30, refillPerSecond: 1 };
 
 // Lightweight product hydration for the chat UI. Divinha only emits slug/SKU
 // per contract §6 — the browser hits this endpoint to render cards with
@@ -44,6 +51,14 @@ type Hydrated = {
 type Match = { ref: z.infer<typeof refSchema>; match: Hydrated | null };
 
 export async function POST(req: NextRequest) {
+  const rl = rateLimit(`chat:products:${getClientIp(req.headers)}`, RATE);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, error: "rate_limited" },
+      { status: 429, headers: { "Retry-After": Math.ceil(rl.retryAfterMs / 1000).toString() } },
+    );
+  }
+
   let parsed: z.infer<typeof bodySchema>;
   try {
     parsed = bodySchema.parse(await req.json());

@@ -68,3 +68,22 @@ export async function saveAlertsConfig(input: unknown): Promise<void> {
   await setSetting("alerts.config", parsed, session.user.email ?? "admin");
   revalidatePath("/admin/observability");
 }
+
+const adminOrderNotificationsSchema = z.object({
+  enabled: z.boolean(),
+  recipients: z
+    .array(z.string().email("e-mail inválido"))
+    .min(0)
+    .max(20, "até 20 destinatários"),
+});
+
+export async function saveAdminOrderNotifications(input: unknown): Promise<void> {
+  const session = await requireAdmin();
+  const parsed = adminOrderNotificationsSchema.parse(input);
+  await setSetting(
+    "notifications.adminOrders",
+    parsed,
+    session.user.email ?? "admin",
+  );
+  revalidatePath("/admin/observability");
+}

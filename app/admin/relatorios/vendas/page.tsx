@@ -2,6 +2,7 @@ import Link from "next/link";
 import { salesRange, topProducts } from "@/lib/metrics";
 import { Sparkline } from "@/components/admin/Sparkline";
 import { formatBRL } from "@/lib/money";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export default async function VendasReportPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
+  await requireAdmin();
   const { from: fromQ, to: toQ } = await searchParams;
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);

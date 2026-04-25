@@ -124,7 +124,7 @@ export async function changePasswordAction(formData: FormData): Promise<ProfileR
   const ok = await compare(parsed.data.currentPassword, user.passwordHash);
   if (!ok) return { ok: false, error: "Senha atual incorreta" };
 
-  const newHash = await hash(parsed.data.newPassword, 10);
+  const newHash = await hash(parsed.data.newPassword, 12);
   await prisma.customer.update({
     where: { id: session.user.id },
     data: { passwordHash: newHash },

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatBRL } from "@/lib/money";
+import { verifyOrderViewToken } from "@/lib/orders/viewer-token";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +26,20 @@ export default async function SuccessPage({
     include: { customer: { select: { id: true, email: true, guest: true, passwordHash: true } } },
   });
   if (!order) notFound();
-  if (order.customerId && session?.user && order.customerId !== session.user.id) notFound();
+
+  // Authorization: EITHER the logged-in user owns the order, OR the caller
+  // carries the viewer cookie stamped at the end of placeOrder. The cookie
+  // path is scoped to /checkout so this is the only place it's visible.
+  // An anonymous attacker who guesses an orderId has neither — notFound().
+  const sessionOwns = Boolean(
+    session?.user && order.customerId && order.customerId === session.user.id,
+  );
+  let cookieOwns = false;
+  if (!sessionOwns) {
+    const jar = await cookies();
+    cookieOwns = verifyOrderViewToken(jar.get("bd_ov")?.value ?? null, order.id);
+  }
+  if (!sessionOwns && !cookieOwns) notFound();
 
   const isPending =
     Boolean(pending) || order.status === "AWAITING_PAYMENT" || order.status === "PENDING";

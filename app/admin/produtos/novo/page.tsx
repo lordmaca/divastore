@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
 import { ProductForm } from "@/components/admin/ProductForm";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
 export default async function NovoProdutoPage() {
+  await requireAdmin();
   const categories = await prisma.category.findMany({
     select: { slug: true, name: true },
     orderBy: { name: "asc" },

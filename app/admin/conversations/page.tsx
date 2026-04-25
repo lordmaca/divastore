@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireAdmin } from "@/lib/admin";
 
 // English-path alias for the pt-BR canonical route at /admin/conversas.
 // Keeps links from old comms / muscle memory working; the list view,
@@ -11,6 +12,7 @@ export default async function ConversationsAdminAlias({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await requireAdmin();
   const params = await searchParams;
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {

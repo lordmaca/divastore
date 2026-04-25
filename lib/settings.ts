@@ -78,6 +78,23 @@ export const SETTINGS_DEFINITIONS = {
       "Liga/desliga o widget de chat da Divinha no storefront. Se desligado, o botão flutuante some e a rota /api/chat/turn responde 503. Use como kill switch se o DivaHub estiver instável.",
     default: { enabled: false } as { enabled: boolean },
   },
+  "notifications.adminOrders": {
+    label: "Notificações de pedido para admin",
+    description:
+      "E-mails enviados automaticamente para a equipe quando um pedido é aprovado (PAID). Diferente dos e-mails transacionais que vão para a cliente — estes são operacionais, internos.",
+    default: {
+      enabled: true,
+      recipients: [
+        "vpapa@pelotongroup.com",
+        "viniciuspapa@gmail.com",
+        "adm@brilhodediva.com.br",
+        "barbaraluchini@gmail.com",
+      ],
+    } as {
+      enabled: boolean;
+      recipients: string[];
+    },
+  },
   "alerts.config": {
     label: "Observabilidade — alertas por e-mail",
     description:

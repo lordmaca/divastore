@@ -15,6 +15,7 @@
 
 import { getSecret } from "@/lib/settings/config";
 import { getSetting } from "@/lib/settings";
+import { assertAllowedUrl, MELHORENVIO_ALLOW } from "@/lib/integration/ssrf";
 
 export type MelhorEnvioConfig = {
   accessToken: string;
@@ -53,7 +54,9 @@ export class MelhorEnvioError extends Error {
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const cfg = await loadMelhorEnvioConfig();
   if (!cfg.accessToken) throw new MelhorEnvioError("Melhor Envio not configured");
-  const res = await fetch(`${cfg.baseUrl}${path}`, {
+  const url = `${cfg.baseUrl}${path}`;
+  assertAllowedUrl(url, MELHORENVIO_ALLOW);
+  const res = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",

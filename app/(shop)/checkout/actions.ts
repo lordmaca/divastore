@@ -23,6 +23,7 @@ import { absoluteUrl } from "@/lib/notifications/templates/shared";
 import { recordOrderEvent } from "@/lib/order-events";
 import { isValidCpf, sanitizeCpf } from "@/lib/cpf";
 import { cookies } from "next/headers";
+import { signOrderViewToken } from "@/lib/orders/viewer-token";
 import { OrderEventType } from "@/lib/generated/prisma/enums";
 
 const addressSchema = z.object({
@@ -427,11 +428,21 @@ export async function placeOrder(formData: FormData) {
     orderId: order.id,
   });
 
-  // Safety net: if the checkout was guest, bake orderId into the redirect
-  // so the success page can resolve the order without a session cookie.
-  if (!session?.user?.id) {
-    redirect(`${pref.initPoint}`);
+  // Stamp a short-lived viewer cookie so the success page can tell "same
+  // browser that placed the order" from "attacker who guessed an orderId".
+  // Scoped to /checkout so it's only ever read there. Expires in 48h —
+  // long enough for a payment that hops to a bank app and back.
+  {
+    const jar = await cookies();
+    jar.set("bd_ov", signOrderViewToken(order.id), {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 48,
+      path: "/checkout",
+    });
   }
+
   redirect(pref.initPoint);
 }
 

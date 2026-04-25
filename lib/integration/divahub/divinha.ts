@@ -13,6 +13,7 @@
 
 import { getSecret } from "@/lib/settings/config";
 import { getSetting } from "@/lib/settings";
+import { assertAllowedUrl, DIVAHUB_ALLOW } from "@/lib/integration/ssrf";
 
 // ---------- Config ----------
 
@@ -165,10 +166,20 @@ export async function health(): Promise<{
   if (!cfg.url) {
     return { ok: false, detail: "DivaHub outbound URL não configurada", checkedAt: new Date() };
   }
+  const healthUrl = `${cfg.url}/api/public/divinha/health`;
+  try {
+    assertAllowedUrl(healthUrl, DIVAHUB_ALLOW);
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+      checkedAt: new Date(),
+    };
+  }
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5_000);
-    const res = await fetch(`${cfg.url}/api/public/divinha/health`, {
+    const res = await fetch(healthUrl, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -308,7 +319,9 @@ export async function* turnStream(
   const cfg = await loadDivinhaConfig();
   if (!isDivinhaConfigured(cfg)) throw new DivinhaNotConfiguredError();
 
-  const res = await fetch(`${cfg.url}/api/public/divinha/turn`, {
+  const url = `${cfg.url}/api/public/divinha/turn`;
+  assertAllowedUrl(url, DIVAHUB_ALLOW);
+  const res = await fetch(url, {
     method: "POST",
     headers: requiredHeaders(cfg, opts, "text/event-stream"),
     body: JSON.stringify(req),
@@ -331,7 +344,9 @@ export async function turnJson(
   const cfg = await loadDivinhaConfig();
   if (!isDivinhaConfigured(cfg)) throw new DivinhaNotConfiguredError();
 
-  const res = await fetch(`${cfg.url}/api/public/divinha/turn`, {
+  const url = `${cfg.url}/api/public/divinha/turn`;
+  assertAllowedUrl(url, DIVAHUB_ALLOW);
+  const res = await fetch(url, {
     method: "POST",
     headers: requiredHeaders(cfg, opts, "application/json"),
     body: JSON.stringify(req),
@@ -361,9 +376,11 @@ export async function reportContractViolations(payload: {
   if (!isDivinhaConfigured(cfg)) return;
 
   try {
+    const url = `${cfg.url}/api/public/divinha/contract-violations`;
+    assertAllowedUrl(url, DIVAHUB_ALLOW);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3_000);
-    await fetch(`${cfg.url}/api/public/divinha/contract-violations`, {
+    await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

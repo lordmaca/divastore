@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,7 @@ export default async function RunsPage({
 }: {
   searchParams: Promise<{ adapter?: string; status?: string; page?: string }>;
 }) {
+  await requireAdmin();
   const { adapter, status, page } = await searchParams;
   const pageNum = Math.max(1, Number(page ?? 1));
 
