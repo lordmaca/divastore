@@ -213,22 +213,33 @@ async function scanBackup(maxAgeHours: number): Promise<Finding[]> {
 }
 
 // Parse a basic 5-field cron string → approximate interval in minutes.
-// This is coarse (worst-case); good enough to set a "missed" threshold.
+// Coarse (worst-case); good enough to set a "missed" threshold.
+//
+// Order matters: check day-of-week / day-of-month BEFORE the hour/minute
+// branches. Otherwise a weekly schedule like `5 3 * * 0` matches the
+// "once per day" branch (numeric minute + numeric hour) and gets a 24h
+// interval instead of 7 days, so the heartbeat looks "missed" 48h after
+// every legitimate run.
 function approxCronIntervalMinutes(expr: string | null | undefined): number {
   if (!expr) return 60; // conservative default
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return 60;
-  const [min, hour] = parts;
+  const [min, hour, dom, , dow] = parts;
+
+  // Most-specific frequency first.
   if (/^\*\/(\d+)$/.test(min)) return Number(RegExp.$1);
   if (min === "*" && hour === "*") return 1;
+
+  // Weekly / monthly take precedence over once-per-day so `5 3 * * 0`
+  // resolves to a week, not a day. Worst case: 7d for any dow filter,
+  // 30d for any dom filter. multiplier × interval is the "missed" window.
+  if (dow !== "*") return 60 * 24 * 7;
+  if (dom !== "*") return 60 * 24 * 30;
+
+  // Daily / hourly fallthroughs.
   if (min === "*") return 60;
-  // Once per hour
   if (/^\d+$/.test(min) && hour === "*") return 60;
-  // Once per day
   if (/^\d+$/.test(min) && /^\d+$/.test(hour)) return 60 * 24;
-  // Weekly / monthly — return 7/30 days worst-case
-  if (parts[4] !== "*") return 60 * 24 * 7;
-  if (parts[2] !== "*") return 60 * 24 * 30;
   return 60 * 24;
 }
 
