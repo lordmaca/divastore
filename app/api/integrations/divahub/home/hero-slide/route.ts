@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z, ZodError } from "zod";
 import { authenticateDivahub } from "@/lib/integration/divahub/auth";
+import { mirrorImageIfExternal } from "@/lib/integration/divahub/image-mirror";
 import { rateLimit, getClientIp } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
 import { HeroSlideSource } from "@/lib/generated/prisma/enums";
@@ -129,8 +130,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // DivaHub ships pre-signed OCI URLs that expire in 7 days. Mirror into our
+  // bucket so the slide doesn't 403 a week after publish. Falls back to the
+  // original URL if the mirror is disabled or the fetch fails.
+  const mirroredImageUrl = await mirrorImageIfExternal(
+    body.imageUrl,
+    `hero/${body.externalId}`,
+    0,
+  );
+
   const baseData = {
-    imageUrl: body.imageUrl,
+    imageUrl: mirroredImageUrl,
     imageAlt: body.imageAlt ?? null,
     headline: body.headline,
     sub: body.sub ?? null,

@@ -34,7 +34,7 @@ type AboutPage = {
     mapUrl: string;
     shoppingUrl: string;
   };
-  contact: { whatsapp: string; instagram: string; email: string };
+  contact: { whatsapp: string; instagram: string; youtube: string; email: string };
 };
 
 export function AboutTab({ initial }: { initial: AboutPage }) {
@@ -111,6 +111,7 @@ export function AboutTab({ initial }: { initial: AboutPage }) {
           contact: {
             whatsapp: draft.contact.whatsapp.trim(),
             instagram: draft.contact.instagram.trim(),
+            youtube: draft.contact.youtube.trim(),
             email: draft.contact.email.trim(),
           },
         });
@@ -343,27 +344,35 @@ export function AboutTab({ initial }: { initial: AboutPage }) {
 
       <SettingsSection
         title="Contato e redes"
-        description="Usado no bloco 'Fica com a gente' no final da página."
+        description="Aparecem no rodapé do site, no botão flutuante de WhatsApp e na página /sobre. Cada campo preenchido vira um link visível em todas as páginas."
       >
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <TextField
             label="WhatsApp"
             value={draft.contact.whatsapp}
             onChange={(v) => patchContact({ whatsapp: v })}
             placeholder="+5511999999999"
-            description="Gera https://wa.me/..."
-          />
-          <TextField
-            label="Instagram"
-            value={draft.contact.instagram}
-            onChange={(v) => patchContact({ instagram: v })}
-            placeholder="@brilhodediva"
+            description="Gera https://wa.me/... — também ativa o botão flutuante."
           />
           <TextField
             label="E-mail"
             type="email"
             value={draft.contact.email}
             onChange={(v) => patchContact({ email: v })}
+          />
+          <TextField
+            label="Instagram"
+            value={draft.contact.instagram}
+            onChange={(v) => patchContact({ instagram: v })}
+            placeholder="@brilhodedivaoficial"
+            description="Pode ser o @ ou a URL completa."
+          />
+          <TextField
+            label="YouTube"
+            value={draft.contact.youtube}
+            onChange={(v) => patchContact({ youtube: v })}
+            placeholder="https://www.youtube.com/@BrilhodeDivaOficial"
+            description="URL do canal completa, ou só o @handle."
           />
         </div>
       </SettingsSection>

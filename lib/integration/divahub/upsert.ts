@@ -3,6 +3,7 @@ import type { ProductInput } from "./inbound-schema";
 import { ProductSource } from "@/lib/generated/prisma/enums";
 import { mirrorImageIfExternal } from "./image-mirror";
 import { scanProduct } from "@/lib/catalog/scan";
+import { revalidateCatalogPublicSurfaces } from "@/lib/seo/cache";
 
 export type UpsertResult = {
   productId: string;
@@ -182,6 +183,10 @@ export async function upsertProductFromDivahub(input: ProductInput): Promise<Ups
     console.error("[divahub-upsert] category scan failed", { productId: product.id, err });
   }
 
+  // Bust the public-surface ISR caches so the GMC feed and sitemap reflect
+  // this push within seconds instead of waiting up to an hour.
+  revalidateCatalogPublicSurfaces();
+
   return {
     productId: product.id,
     slug: product.slug,
@@ -198,5 +203,6 @@ export async function deactivateProductBySlug(slug: string): Promise<{ deactivat
     where: { slug, active: true },
     data: { active: false },
   });
+  if (updated.count > 0) revalidateCatalogPublicSurfaces();
   return { deactivated: updated.count > 0 };
 }

@@ -44,7 +44,7 @@ export default async function Image() {
               textTransform: "uppercase",
             }}
           >
-            DivaHub · AI Portal
+            Joias · Semi-Joias
           </div>
           <div
             style={{

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSetting } from "@/lib/settings";
 import { SITE_URL } from "@/lib/config";
+import { JsonLd } from "@/components/JsonLd";
+import { localBusinessJsonLd } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
@@ -53,9 +55,15 @@ export default async function SobrePage() {
 
   const openingLabel = page.visit.openingDateIso ? formatPtDate(page.visit.openingDateIso) : "";
   const days = page.visit.openingDateIso ? daysSince(page.visit.openingDateIso) : 0;
+  const localBusiness = localBusinessJsonLd(page.visit, page.contact);
 
   return (
     <main className="mx-auto max-w-5xl px-4 sm:px-6 py-10 sm:py-14 space-y-12">
+      {/* LocalBusiness/JewelryStore JSON-LD — strongest "physical store in
+          Mauá" signal we can give Google. Pulled from the about.page setting
+          so admin updates flow without redeploys. */}
+      {localBusiness ? <JsonLd data={localBusiness} /> : null}
+
       {/* Header */}
       <header className="text-center space-y-4">
         <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--pink-500)]">
@@ -160,7 +168,7 @@ export default async function SobrePage() {
       </section>
 
       {/* Contact / Follow */}
-      {(page.contact.whatsapp || page.contact.instagram || page.contact.email) ? (
+      {(page.contact.whatsapp || page.contact.instagram || page.contact.youtube || page.contact.email) ? (
         <section className="text-center space-y-3">
           <h2 className="font-display text-2xl text-[color:var(--pink-600)]">
             Fica com a gente ✨
@@ -177,6 +185,16 @@ export default async function SobrePage() {
                 className="rounded-full bg-white/70 hover:bg-white text-sm px-4 py-2 border border-white inline-flex items-center gap-2"
               >
                 📸 Instagram
+              </a>
+            ) : null}
+            {page.contact.youtube ? (
+              <a
+                href={normalizeYoutube(page.contact.youtube)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full bg-white/70 hover:bg-white text-sm px-4 py-2 border border-white inline-flex items-center gap-2"
+              >
+                ▶ YouTube
               </a>
             ) : null}
             {page.contact.whatsapp ? (
@@ -274,5 +292,13 @@ function normalizeInstagram(raw: string): string {
   if (t.startsWith("http")) return t;
   const handle = t.replace(/^@/, "");
   return `https://instagram.com/${handle}`;
+}
+
+function normalizeYoutube(raw: string): string {
+  const t = raw.trim();
+  if (t.startsWith("http")) return t;
+  // Accept "@Handle" or bare "Handle" — YouTube uses the @-handle URL.
+  const handle = t.startsWith("@") ? t : `@${t}`;
+  return `https://www.youtube.com/${handle}`;
 }
 

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import type { StockSyncSource } from "@/lib/generated/prisma/enums";
 import { getSetting } from "@/lib/settings";
+import { revalidateCatalogPublicSurfaces } from "@/lib/seo/cache";
 
 export type Input = {
   source: StockSyncSource;
@@ -170,6 +171,9 @@ export async function reconcileStockFromTiny(input: Input): Promise<Outcome> {
         }),
       ]),
     );
+    // Stock changed → availability flips → GMC feed needs refresh so we
+    // don't ship "in_stock" XML for a SKU that's actually 0.
+    revalidateCatalogPublicSurfaces();
   }
 
   return {

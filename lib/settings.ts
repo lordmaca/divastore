@@ -172,6 +172,7 @@ export const SETTINGS_DEFINITIONS = {
       contact: {
         whatsapp: "",
         instagram: "",
+        youtube: "",
         email: "contato@brilhodediva.com.br",
       },
     } as {
@@ -195,7 +196,12 @@ export const SETTINGS_DEFINITIONS = {
         mapUrl: string;
         shoppingUrl: string;
       };
-      contact: { whatsapp: string; instagram: string; email: string };
+      contact: {
+        whatsapp: string;
+        instagram: string;
+        youtube: string;
+        email: string;
+      };
     },
   },
   "s3.config": {

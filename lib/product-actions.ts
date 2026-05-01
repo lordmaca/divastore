@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/admin";
 import { productInput } from "@/lib/product-schema";
 import { ProductSource } from "@/lib/generated/prisma/enums";
+import { revalidateCatalogPublicSurfaces } from "@/lib/seo/cache";
 
 // Narrow the shared schema to the admin form: admin can change slug only on
 // create (immutable on edit because the slug is part of canonical URLs).
@@ -75,6 +76,7 @@ export async function createProduct(input: z.infer<typeof createSchema>) {
     });
     revalidatePath("/admin/produtos");
     revalidatePath("/loja");
+    revalidateCatalogPublicSurfaces();
     return { id: product.id, slug: product.slug };
   });
 }
@@ -156,6 +158,7 @@ export async function updateProduct(input: z.infer<typeof updateSchema>) {
     revalidatePath(`/admin/produtos/${existing.id}`);
     revalidatePath(`/loja/${existing.slug}`);
     revalidatePath("/loja");
+    revalidateCatalogPublicSurfaces();
     return { id: existing.id, slug: existing.slug };
   });
 }
@@ -180,6 +183,7 @@ export async function bulkProductAction(
     });
     revalidatePath("/admin/produtos");
     revalidatePath("/loja");
+    revalidateCatalogPublicSurfaces();
     return { ok: true, affected: res.count, skipped: [] };
   }
 
@@ -233,6 +237,7 @@ export async function bulkProductAction(
   revalidatePath("/admin/produtos");
   revalidatePath("/loja");
   revalidatePath("/carrinho");
+  revalidateCatalogPublicSurfaces();
   return { ok: true, affected, skipped };
 }
 
@@ -246,5 +251,6 @@ export async function setProductActive(id: string, active: boolean) {
   revalidatePath("/admin/produtos");
   revalidatePath(`/loja/${p.slug}`);
   revalidatePath("/loja");
+  revalidateCatalogPublicSurfaces();
   return { ok: true };
 }

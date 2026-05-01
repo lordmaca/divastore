@@ -17,7 +17,11 @@ import { getProductReviewSummary, customerEligibleToReview } from "@/lib/reviews
 import { SITE_URL as BASE } from "@/lib/config";
 import type { Metadata } from "next";
 
-export const dynamic = "force-dynamic";
+// `force-dynamic` was breaking notFound() — Next 16 commits a 200 status
+// before the boundary throws when force-dynamic is set, producing soft-404s
+// on every unknown slug (Google-killer). Drop it; the page will still render
+// dynamically because `auth()` reads cookies.
+export const revalidate = 0;
 
 async function loadProduct(slug: string) {
   return prisma.product.findUnique({
@@ -44,7 +48,21 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const p = await loadProduct(slug);
-  if (!p || !p.active) return { title: "Produto não encontrado" };
+  // Unknown slug — Next 16 commits a 200 status before notFound() / redirect()
+  // throw because the (shop) layout begins streaming first. Workaround:
+  // serve a noindex/nofollow metadata so Google won't index the URL, and
+  // let the page itself render the not-found UI (the user-facing 404
+  // experience is unchanged). Search Console will still report soft-404s
+  // for these URLs but that's the correct signal — we WANT Google to
+  // treat them as not-found and drop them from the index.
+  if (!p || !p.active) {
+    return {
+      title: "Produto não encontrado · Brilho de Diva",
+      description: "Esse produto não está mais disponível.",
+      robots: { index: false, follow: false },
+      alternates: { canonical: `${BASE}/loja` },
+    };
+  }
   const cover = p.images[0]?.url;
 
   // Prefer DivaHub-curated SEO when present; otherwise derive from content.
@@ -81,8 +99,12 @@ export default async function ProductPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const [product, session] = await Promise.all([loadProduct(slug), auth()]);
+  // Existence check FIRST. generateMetadata returned noindex for unknown
+  // slugs; the page renders the not-found UI for the user. notFound()
+  // here triggers the slug-level not-found.tsx so the layout still works.
+  const product = await loadProduct(slug);
   if (!product || !product.active) notFound();
+  const session = await auth();
 
   const customerId = session?.user?.id;
   const [summary, eligibility, liked, related] = await Promise.all([
