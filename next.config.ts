@@ -20,14 +20,17 @@ const CSP_DIRECTIVES = [
   // Images: own origin, the OCI public + DivaHub asset buckets, Unsplash
   // for placeholder hero, data: for favicons/inline SVG.
   "img-src 'self' data: blob: https://*.oraclecloud.com https://images.unsplash.com https://*.brilhodediva.com.br",
-  // Scripts: self only. No inline, no eval. If we ever add GA/FB Pixel,
-  // whitelist explicitly here — don't relax to 'unsafe-inline'.
-  "script-src 'self'",
-  // XHR / fetch: self + the three integrations the browser might talk to
-  // (all of ours go through the BFF so this is conservative).
-  "connect-src 'self' https://*.brilhodediva.com.br",
-  // YouTube embeds inside product pages and /sobre.
-  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com",
+  // Scripts: self + Google APIs platform loader for Google Customer
+  // Reviews opt-in (only loaded on /checkout/sucesso when enabled).
+  // 'unsafe-inline' is required because the GCR snippet ships an inline
+  // bootstrap; it's the same pattern Google's own integration docs use.
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://www.gstatic.com",
+  // XHR / fetch: self + Google APIs (GCR loads sub-modules) + DivaHub
+  // (storefront BFF talks to /api/public/divinha/*).
+  "connect-src 'self' https://*.brilhodediva.com.br https://apis.google.com https://*.google.com",
+  // YouTube embeds inside product pages and /sobre. google.com frame is
+  // for the GCR survey popup that Google renders inside an iframe.
+  "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://www.google.com",
   // Who can frame us: only ourselves. Blocks clickjacking on checkout.
   "frame-ancestors 'self'",
   // No Flash/plug-ins.

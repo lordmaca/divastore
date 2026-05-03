@@ -20,6 +20,15 @@ export const SETTINGS_DEFINITIONS = {
       "Conteúdo da meta-tag de verificação fornecida pelo Google Search Console (sem aspas).",
     default: { content: "" } as { content: string },
   },
+  "integrations.googleCustomerReviews": {
+    label: "Google Customer Reviews",
+    description:
+      "Pop-up de opt-in que aparece na página /checkout/sucesso quando o pedido é aprovado, perguntando se o cliente quer receber a pesquisa do Google sobre a compra. Pré-requisito: conta no Merchant Center com a integração ativada (https://merchants.google.com → Crescimento → Avaliações do Consumidor).",
+    default: { enabled: false, merchantId: 0 } as {
+      enabled: boolean;
+      merchantId: number;
+    },
+  },
   "shipping.freeThresholdCents": {
     label: "Frete grátis a partir de (R$)",
     description: "Valor mínimo do subtotal para frete grátis. 0 = desabilitado.",

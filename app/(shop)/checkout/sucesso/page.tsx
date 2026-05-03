@@ -5,8 +5,22 @@ import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatBRL } from "@/lib/money";
 import { verifyOrderViewToken } from "@/lib/orders/viewer-token";
+import { getSetting } from "@/lib/settings";
+import { GoogleCustomerReviewsOptIn } from "@/components/GoogleCustomerReviewsOptIn";
 
 export const dynamic = "force-dynamic";
+
+// Best-effort estimated delivery date for Google Customer Reviews.
+// shippingEtaDays is captured at checkout from the Melhor Envio quote;
+// fall back to a generous 10-day window so we never ship a date in the
+// past (Google rejects past dates with "invalid_estimated_delivery_date").
+function estimatedDeliveryIso(createdAt: Date, etaDays: number | null): string {
+  const days = Math.max(2, etaDays ?? 10);
+  const d = new Date(createdAt);
+  d.setUTCDate(d.getUTCDate() + days);
+  // YYYY-MM-DD per the GCR snippet template.
+  return d.toISOString().slice(0, 10);
+}
 
 // Public landing for shoppers returning from Mercado Pago. This page MUST be
 // read-only with respect to order/payment state — the source of truth is the
@@ -20,11 +34,14 @@ export default async function SuccessPage({
   const { orderId, pending } = await searchParams;
   if (!orderId) notFound();
 
-  const session = await auth();
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { customer: { select: { id: true, email: true, guest: true, passwordHash: true } } },
-  });
+  const [session, order, gcr] = await Promise.all([
+    auth(),
+    prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: { select: { id: true, email: true, guest: true, passwordHash: true } } },
+    }),
+    getSetting("integrations.googleCustomerReviews"),
+  ]);
   if (!order) notFound();
 
   // Authorization: EITHER the logged-in user owns the order, OR the caller
@@ -49,8 +66,31 @@ export default async function SuccessPage({
   const offerAccountClaim =
     Boolean(order.customer?.guest && !order.customer.passwordHash && order.customer.email);
 
+  // Google Customer Reviews opt-in renders only when the order is fully
+  // approved (Google rejects opt-ins for pending/cancelled orders) AND the
+  // integration is enabled with a valid merchantId AND we know the
+  // customer's email. Without all three, skip — better no popup than a
+  // broken one.
+  const showGcrOptIn =
+    isApproved &&
+    gcr.enabled &&
+    gcr.merchantId > 0 &&
+    Boolean(order.customer?.email);
+
   return (
     <main className="mx-auto max-w-2xl px-4 py-16">
+      {showGcrOptIn ? (
+        <GoogleCustomerReviewsOptIn
+          merchantId={gcr.merchantId}
+          orderId={order.id}
+          email={order.customer?.email ?? ""}
+          deliveryCountry="BR"
+          estimatedDeliveryDate={estimatedDeliveryIso(
+            order.createdAt,
+            order.shippingEtaDays,
+          )}
+        />
+      ) : null}
       <div className="glass-card rounded-3xl p-10 text-center">
         <p className="text-5xl mb-4">{isApproved ? "✨" : "⏳"}</p>
         <h1 className="font-display text-3xl text-[color:var(--pink-600)]">

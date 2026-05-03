@@ -338,8 +338,16 @@ async function StoreTabServer() {
 }
 
 async function SeoTabServer() {
-  const googleVerification = await getSetting("seo.googleVerification");
-  return <SeoTab googleVerification={googleVerification} />;
+  const [googleVerification, googleCustomerReviews] = await Promise.all([
+    getSetting("seo.googleVerification"),
+    getSetting("integrations.googleCustomerReviews"),
+  ]);
+  return (
+    <SeoTab
+      googleVerification={googleVerification}
+      googleCustomerReviews={googleCustomerReviews}
+    />
+  );
 }
 
 async function NavigationTabServer() {
